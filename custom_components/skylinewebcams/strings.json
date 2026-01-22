@@ -1,0 +1,58 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add Skyline Webcam",
+        "description": "Choose how you want to add a webcam.",
+        "data": {
+          "action": "Method"
+        }
+      },
+      "language": {
+        "title": "Select Language",
+        "description": "Choose your preferred language for browsing webcams.",
+        "data": {
+          "language": "Language"
+        }
+      },
+      "continent": {
+        "title": "Select Continent",
+        "description": "Choose a continent to browse.",
+        "data": {
+          "continent": "Continent"
+        }
+      },
+      "country": {
+        "title": "Select Country",
+        "description": "Choose a country to browse.",
+        "data": {
+          "country": "Country"
+        }
+      },
+      "browse": {
+        "title": "Select Camera or Region",
+        "description": "Select a sub-region or a specific camera.",
+        "data": {
+          "selection": "Selection"
+        }
+      },
+      "manual": {
+        "title": "Manual URL",
+        "description": "Enter the full URL of the SkylineWebcams page.",
+        "data": {
+          "url": "URL"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to SkylineWebcams.",
+      "invalid_url": "The URL does not look like a valid SkylineWebcams page.",
+      "no_items_found": "No cameras or sub-regions found at this location."
+    },
+    "abort": {
+      "cannot_connect": "Failed to connect to SkylineWebcams.",
+      "no_items_found": "No cameras found.",
+      "unknown": "Unexpected error occurred."
+    }
+  }
+}
