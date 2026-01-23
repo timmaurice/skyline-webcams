@@ -20,7 +20,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install homeassistant pytest-homeassistant-custom-component beautifulsoup4 lxml pytest pytest-asyncio pytest-socket aiohttp
+          pip install homeassistant pytest-homeassistant-custom-component beautifulsoup4 lxml pytest pytest-asyncio pytest-socket aiohttp pytest-mock
 
       - name: Run tests (offline)
         run: |
