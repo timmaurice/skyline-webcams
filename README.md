@@ -54,17 +54,45 @@ View [SkylineWebcams](https://www.skylinewebcams.com/) streams as native camera 
 
 1.  Select **Manual URL**.
 2.  Enter the full URL of the webcam you want to add.
-    - Example: `https://www.skylinewebcams.com/en/webcam/ellada/ionian-islands/corfu/acharavi-beach.html`
+    - Example: `https://www.skylinewebcams.com/en/webcam/deutschland/bayern/schwangau/schloss-neuschwanstein.html`
 
 ## Created Sensors
 
 | Sensor | Description | Attributes | Example Value |
 | :----- | :---------- | :--------- | :------------ |
-| `camera` | The main camera entity | `description` | Acharavi Beach |
-| | | `country` | Greece |
-| | | `region` | Ionian Islands |
-| | | `place` | Corfu |
+| `camera` | The main camera entity | `description` | Panoramic view of Schwangau, the Neuschwanstein and the Hohenschwangau Castles |
+| | | `country` | Germany |
+| | | `region` | Bavaria |
+| | | `place` | Schwangau |
 | | | `source` | `https://www.skylinewebcams.com/..` |
+
+### Card example
+<img src="https://raw.githubusercontent.com/timmaurice/skyline-webcams/main/image.png" alt="Card Screenshot" />
+
+```
+type: picture-entity
+entity: camera.live_cam_schwangau_neuschwanstein_castle
+camera_image: camera.live_cam_schwangau_neuschwanstein_castle
+show_state: false
+show_name: false
+camera_view: live
+fit_mode: contain
+
+type: markdown
+content: >-
+  ## 📍 **{{ state_attr('camera.live_cam_schwangau_neuschwanstein_castle', 'friendly_name') }}**
+
+  *{{ state_attr('camera.live_cam_schwangau_neuschwanstein_castle', 'description') }}*
+
+  **🌍 Country:** {{ state_attr('camera.live_cam_schwangau_neuschwanstein_castle', 'country') }}
+
+  **📌 Region:** {{ state_attr('camera.live_cam_schwangau_neuschwanstein_castle', 'region') }}
+
+  **📍 Place:** {{ state_attr('camera.live_cam_schwangau_neuschwanstein_castle', 'place') }}
+
+  [🔗 View live webcam]({{ state_attr('camera.live_cam_schwangau_neuschwanstein_castle', 'source') }})
+text_only: true
+```
 
 ## Contributions
 
