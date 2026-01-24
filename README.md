@@ -18,22 +18,19 @@ View [SkylineWebcams](https://www.skylinewebcams.com/) streams as native camera 
 
 ## Installation
 
-### Method 1: HACS (Recommended)
+### HACS (Recommended)
 
-1.  Open HACS.
-2.  Click on **Integrations**.
-3.  Click the menu icon (dots) in the top right and select **Custom repositories**.
-4.  Add the URL of this repository.
-5.  Select **Integration** as the category.
-6.  Click **Add**.
-7.  Find **SkylineWebcams** in the list and install it.
-8.  Restart Home Assistant.
+This card is available in the [Home Assistant Community Store (HACS)](https://hacs.xyz/).
 
-### Method 2: Manual
+<a href="https://my.home-assistant.io/redirect/hacs_repository/?owner=timmaurice&repository=skyline-webcam&category=integration" target="_blank" rel="noreferrer noopener"><img src="https://my.home-assistant.io/badges/hacs_repository.svg" alt="Open your Home Assistant instance and open a repository inside the Home Assistant Community Store." /></a>
+
+<details>
+<summary>Manual Installation</summary>
 
 1.  Download the `custom_components/skylinewebcams` folder.
 2.  Copy it to your Home Assistant `config/custom_components/` directory.
 3.  Restart Home Assistant.
+</details>
 
 ## Configuration
 
@@ -58,41 +55,48 @@ View [SkylineWebcams](https://www.skylinewebcams.com/) streams as native camera 
 
 ## Created Sensors
 
-| Sensor | Description | Attributes | Example Value |
-| :----- | :---------- | :--------- | :------------ |
+| Sensor   | Description            | Attributes    | Example Value                                                                  |
+| :------- | :--------------------- | :------------ | :----------------------------------------------------------------------------- |
 | `camera` | The main camera entity | `description` | Panoramic view of Schwangau, the Neuschwanstein and the Hohenschwangau Castles |
-| | | `country` | Germany |
-| | | `region` | Bavaria |
-| | | `place` | Schwangau |
-| | | `source` | `https://www.skylinewebcams.com/..` |
+|          |                        | `country`     | Germany                                                                        |
+|          |                        | `region`      | Bavaria                                                                        |
+|          |                        | `place`       | Schwangau                                                                      |
+|          |                        | `source`      | `https://www.skylinewebcams.com/..`                                            |
 
 ### Card example
+
 <img src="https://raw.githubusercontent.com/timmaurice/skyline-webcams/main/image.png" alt="Card Screenshot" />
+
+<details>
+<summary>Code</summary>
 
 ```
 type: picture-entity
 entity: camera.live_cam_schwangau_neuschwanstein_castle
 camera_image: camera.live_cam_schwangau_neuschwanstein_castle
-show_state: false
-show_name: false
 camera_view: live
 fit_mode: contain
+show_name: false
+show_state: false
 
 type: markdown
 content: >-
-  ## 📍 **{{ state_attr('camera.live_cam_schwangau_neuschwanstein_castle', 'friendly_name') }}**
 
-  *{{ state_attr('camera.live_cam_schwangau_neuschwanstein_castle', 'description') }}*
+## 📍 **{{ state_attr('camera.live_cam_schwangau_neuschwanstein_castle', 'friendly_name') }}**
 
-  **🌍 Country:** {{ state_attr('camera.live_cam_schwangau_neuschwanstein_castle', 'country') }}
+_{{ state_attr('camera.live_cam_schwangau_neuschwanstein_castle', 'description') }}_
 
-  **📌 Region:** {{ state_attr('camera.live_cam_schwangau_neuschwanstein_castle', 'region') }}
+**🌍 Country:** {{ state_attr('camera.live_cam_schwangau_neuschwanstein_castle', 'country') }}
 
-  **📍 Place:** {{ state_attr('camera.live_cam_schwangau_neuschwanstein_castle', 'place') }}
+**📌 Region:** {{ state_attr('camera.live_cam_schwangau_neuschwanstein_castle', 'region') }}
 
-  [🔗 View live webcam]({{ state_attr('camera.live_cam_schwangau_neuschwanstein_castle', 'source') }})
+**📍 Place:** {{ state_attr('camera.live_cam_schwangau_neuschwanstein_castle', 'place') }}
+
+[🔗 View live webcam]({{ state_attr('camera.live_cam_schwangau_neuschwanstein_castle', 'source') }})
 text_only: true
+
 ```
+</details>
 
 ## Contributions
 
