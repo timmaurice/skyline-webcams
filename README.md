@@ -9,6 +9,8 @@
 
 View [SkylineWebcams](https://www.skylinewebcams.com/) streams as native camera entities in Home Assistant.
 
+<img src="https://cdn.brandfetch.io/id2mczdJ_1/w/1500/h/500/idVkBsrVjZ.jpeg?c=1bxid64Mup7aczewSAYMX&t=1764739803892" title="+5000 Live Cams">
+
 ## Features
 
 - **Webcam Discovery**: Browse and find webcams by continent, country, and location.

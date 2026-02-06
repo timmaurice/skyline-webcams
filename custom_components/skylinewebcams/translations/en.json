@@ -52,6 +52,7 @@
     "abort": {
       "cannot_connect": "Failed to connect to SkylineWebcams.",
       "no_items_found": "No cameras found.",
+      "already_configured": "Webcam is already configured",
       "unknown": "Unexpected error occurred."
     }
   }

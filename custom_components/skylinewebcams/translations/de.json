@@ -1,0 +1,59 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Skyline Webcam hinzufügen",
+        "description": "Wählen Sie aus, wie Sie eine Webcam hinzufügen möchten.",
+        "data": {
+          "action": "Methode"
+        }
+      },
+      "language": {
+        "title": "Sprache auswählen",
+        "description": "Wählen Sie Ihre bevorzugte Sprache für das Durchsuchen von Webcams.",
+        "data": {
+          "language": "Sprache"
+        }
+      },
+      "continent": {
+        "title": "Kontinent auswählen",
+        "description": "Wählen Sie einen Kontinent zum Durchsuchen.",
+        "data": {
+          "continent": "Kontinent"
+        }
+      },
+      "country": {
+        "title": "Land auswählen",
+        "description": "Wählen Sie ein Land zum Durchsuchen.",
+        "data": {
+          "country": "Land"
+        }
+      },
+      "browse": {
+        "title": "Kamera oder Region auswählen",
+        "description": "Wählen Sie eine Unterregion oder eine bestimmte Kamera.",
+        "data": {
+          "selection": "Auswahl"
+        }
+      },
+      "manual": {
+        "title": "Manuelle URL",
+        "description": "Geben Sie die vollständige URL der SkylineWebcams-Seite ein.",
+        "data": {
+          "url": "URL"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Verbindung zu SkylineWebcams fehlgeschlagen.",
+      "invalid_url": "Die URL scheint keine gültige SkylineWebcams-Seite zu sein.",
+      "no_items_found": "An diesem Ort wurden keine Kameras oder Unterregionen gefunden."
+    },
+    "abort": {
+      "cannot_connect": "Verbindung zu SkylineWebcams fehlgeschlagen.",
+      "no_items_found": "Keine Kameras gefunden.",
+      "already_configured": "Webcam ist bereits konfiguriert",
+      "unknown": "Unerwarteter Fehler aufgetreten."
+    }
+  }
+}

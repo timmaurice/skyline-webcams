@@ -19,11 +19,9 @@ jobs:
         id: get_version
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
 
-      # 3. Create ZIP in repo root (only skylinewebcams folder)
+      # 3. Create ZIP in repo root with the correct structure
       - name: Create zip archive for HACS
-        run: |
-          cd custom_components/skylinewebcams
-          zip -r ../../skylinewebcams.zip .
+        run: zip -r skylinewebcams.zip custom_components/skylinewebcams
 
       # 4. Verify ZIP exists
       - name: List files

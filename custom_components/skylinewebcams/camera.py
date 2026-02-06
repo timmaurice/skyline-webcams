@@ -38,6 +38,7 @@ class SkylineWebcamsCamera(Camera):
     """Define a SkylineWebcams camera."""
 
     _attr_supported_features = CameraEntityFeature.STREAM
+    _attr_icon = "mdi:webcam"
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         """Initialize the camera."""
@@ -45,7 +46,7 @@ class SkylineWebcamsCamera(Camera):
         self.hass = hass
         self._url = entry.data[CONF_URL]
         self._attr_name = entry.title
-        self._attr_unique_id = f"{DOMAIN}_{entry.entry_id}"
+        self._attr_unique_id = entry.unique_id
         self._stream_url = None
         self._additional_attributes = {"source": self._url}
         self._session = None
