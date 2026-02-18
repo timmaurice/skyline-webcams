@@ -24,7 +24,7 @@ View [SkylineWebcams](https://www.skylinewebcams.com/) streams as native camera 
 
 This card is available in the [Home Assistant Community Store (HACS)](https://hacs.xyz/).
 
-<a href="https://my.home-assistant.io/redirect/hacs_repository/?owner=timmaurice&repository=skyline-webcam&category=integration" target="_blank" rel="noreferrer noopener"><img src="https://my.home-assistant.io/badges/hacs_repository.svg" alt="Open your Home Assistant instance and open a repository inside the Home Assistant Community Store." /></a>
+<a href="https://my.home-assistant.io/redirect/hacs_repository/?owner=timmaurice&repository=skyline-webcams&category=integration" target="_blank" rel="noreferrer noopener"><img src="https://my.home-assistant.io/badges/hacs_repository.svg" alt="Open your Home Assistant instance and open a repository inside the Home Assistant Community Store." /></a>
 
 <details>
 <summary>Manual Installation</summary>
@@ -98,6 +98,7 @@ _{{ state_attr('camera.live_cam_schwangau_neuschwanstein_castle', 'description')
 text_only: true
 
 ```
+
 </details>
 
 ## Contributions
