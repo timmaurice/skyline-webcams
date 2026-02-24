@@ -3,7 +3,7 @@
   "name": "SkylineWebcams",
   "codeowners": ["@timmaurice"],
   "config_flow": true,
-  "dependencies": ["stream"],
+  "dependencies": ["http", "stream"],
   "after_dependencies": ["ffmpeg"],
   "documentation": "https://github.com/timmaurice/skyline-webcams",
   "iot_class": "cloud_polling",
