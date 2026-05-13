@@ -1,0 +1,9 @@
+-r requirements.txt
+homeassistant
+pytest-homeassistant-custom-component
+lxml
+pytest
+pytest-asyncio
+pytest-socket
+aiohttp
+pytest-mock

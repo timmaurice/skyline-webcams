@@ -1,0 +1,35 @@
+# Configure a default setup of Home Assistant (frontend, api, etc)
+default_config:
+
+# Load Lovelace UI in YAML mode so we can pre-provision the dashboard
+lovelace:
+  resource_mode: yaml
+  dashboards:
+    lovelace:
+      mode: yaml
+      filename: ui-lovelace.yaml
+      title: Skyline-Webcams
+      icon: mdi:webcam
+      show_in_sidebar: true
+
+logger:
+  default: info
+  logs:
+    custom_components.skylinewebcams: debug
+
+camera:
+  - platform: skylinewebcams
+    name: "Schwangau - Neuschwanstein Castle"
+    url: "https://www.skylinewebcams.com/en/webcam/deutschland/bayern/schwangau/schloss-neuschwanstein.html"
+
+  - platform: skylinewebcams
+    name: "Kenya - Tsavo East National Park"
+    url: "https://www.skylinewebcams.com/en/webcam/kenya/taita-taveta-county/voi/tsavo-east-national-park.html"
+
+  - platform: skylinewebcams
+    name: "Venice - St Mark Square"
+    url: "https://www.skylinewebcams.com/en/webcam/italia/veneto/venezia/piazza-san-marco.html"
+
+  - platform: skylinewebcams
+    name: "Rome - Pantheon"
+    url: "https://www.skylinewebcams.com/en/webcam/italia/lazio/roma/pantheon.html"

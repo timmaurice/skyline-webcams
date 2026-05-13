@@ -34,14 +34,26 @@ This card is available in the [Home Assistant Community Store (HACS)](https://ha
 3.  Restart Home Assistant.
 </details>
 
+### Docker (Development & Testing)
+
+For a quick trial or development, a Docker environment is provided.
+
+1.  Clone this repository.
+2.  Run `docker compose up`.
+3.  Access Home Assistant at [http://localhost:8123](http://localhost:8123).
+
+The Docker environment comes **pre-configured** with a live webcam (Neuschwanstein Castle) so you can see it in action immediately.
+
 ## Configuration
+
+### UI (Recommended)
 
 1.  Go to **Settings** > **Devices & Services** > **Integrations**.
 2.  Click **Add Integration**.
 3.  Search for **SkylineWebcams**.
 4.  You have two options: **Browse** or **Manual URL**.
 
-### Browse
+#### Browse
 
 1.  Select **Browse**.
 2.  Choose your preferred language.
@@ -49,11 +61,34 @@ This card is available in the [Home Assistant Community Store (HACS)](https://ha
 4.  Select a country.
 5.  Browse through the locations and select a webcam.
 
-### Manual URL
+#### Manual URL
 
 1.  Select **Manual URL**.
 2.  Enter the full URL of the webcam you want to add.
     - Example: `https://www.skylinewebcams.com/en/webcam/deutschland/bayern/schwangau/schloss-neuschwanstein.html`
+
+### YAML
+
+You can also configure cameras directly in your `configuration.yaml`:
+
+```yaml
+camera:
+  - platform: skylinewebcams
+    name: "Schwangau - Neuschwanstein Castle"
+    url: "https://www.skylinewebcams.com/en/webcam/deutschland/bayern/schwangau/schloss-neuschwanstein.html"
+
+  - platform: skylinewebcams
+    name: "New York - Times Square"
+    url: "https://www.skylinewebcams.com/en/webcam/united-states/new-york/new-york/times-square.html"
+
+  - platform: skylinewebcams
+    name: "Venice - St Mark Square"
+    url: "https://www.skylinewebcams.com/en/webcam/italia/veneto/venezia/piazza-san-marco.html"
+
+  - platform: skylinewebcams
+    name: "Rome - Pantheon"
+    url: "https://www.skylinewebcams.com/en/webcam/italia/lazio/roma/pantheon.html"
+```
 
 ## Created Sensors
 

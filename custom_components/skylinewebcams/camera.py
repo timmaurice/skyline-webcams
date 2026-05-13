@@ -14,14 +14,49 @@ from homeassistant.components.camera import Camera, CameraEntityFeature
 from homeassistant.components.ffmpeg import async_get_image
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import CONF_URL, CONF_NAME
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.network import get_url
+import homeassistant.helpers.config_validation as cv
+import voluptuous as vol
 
-from .const import CONF_URL, DOMAIN
+from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
+
+PLATFORM_SCHEMA = cv.PLATFORM_SCHEMA.extend(
+    {
+        vol.Required(CONF_URL): cv.string,
+        vol.Optional(CONF_NAME): cv.string,
+    }
+)
+
+
+async def async_setup_platform(
+    hass: HomeAssistant,
+    config: dict,
+    async_add_entities: AddEntitiesCallback,
+    discovery_info: dict | None = None,
+) -> None:
+    """Set up SkylineWebcams camera from YAML configuration."""
+    if DOMAIN not in hass.data:
+        hass.data[DOMAIN] = {}
+        hass.http.register_view(SkylineWebcamsProxyView(hass))
+
+    import hashlib
+    url = config[CONF_URL]
+    name = config.get(CONF_NAME, "Skyline Webcam")
+    
+    # Use URL as unique_id for YAML as well
+    unique_id = url
+    # For YAML, we use a hash of the URL as the entry_id for safe proxy routing
+    entry_id = hashlib.md5(url.encode()).hexdigest()
+
+    camera = SkylineWebcamsCamera(hass, url, name, unique_id, entry_id)
+    hass.data[DOMAIN][entry_id] = camera
+    async_add_entities([camera], True)
 
 
 async def async_setup_entry(
@@ -35,7 +70,13 @@ async def async_setup_entry(
         hass.data[DOMAIN] = {}
         hass.http.register_view(SkylineWebcamsProxyView(hass))
 
-    camera = SkylineWebcamsCamera(hass, entry)
+    camera = SkylineWebcamsCamera(
+        hass, 
+        entry.data[CONF_URL], 
+        entry.title, 
+        entry.unique_id, 
+        entry.entry_id
+    )
     hass.data[DOMAIN][entry.entry_id] = camera
     async_add_entities([camera], True)
 
@@ -53,6 +94,7 @@ class SkylineWebcamsProxyView(HomeAssistantView):
 
     async def get(self, request: web.Request, entry_id: str) -> web.Response:
         """Handle GET request to return a 302 redirect to the fresh stream."""
+        # Try both entry_id and unique_id (for YAML)
         camera: SkylineWebcamsCamera | None = self.hass.data.get(DOMAIN, {}).get(
             entry_id
         )
@@ -77,14 +119,21 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
     _attr_frontend_stream_type = "hls"
     _attr_icon = "mdi:webcam"
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+    def __init__(
+        self, 
+        hass: HomeAssistant, 
+        url: str, 
+        name: str, 
+        unique_id: str | None, 
+        entry_id: str
+    ) -> None:
         """Initialize the camera."""
         super().__init__()
         self.hass = hass
-        self._entry_id = entry.entry_id
-        self._url = entry.data[CONF_URL]
-        self._attr_name = entry.title
-        self._attr_unique_id = entry.unique_id
+        self._entry_id = entry_id
+        self._url = url
+        self._attr_name = name
+        self._attr_unique_id = unique_id
         self._stream_url = None
         self._last_update = 0
         self._additional_attributes = {"source": self._url}

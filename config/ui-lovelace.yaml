@@ -1,0 +1,105 @@
+title: "SkylineWebcams World Tour"
+views:
+  - title: Global Webcams
+    icon: mdi:earth
+    type: sections
+    sections:
+      # 1. Kenya - Tsavo East National Park
+      - type: grid
+        title: Kenya
+        cards:
+          - type: picture-entity
+            entity: camera.kenya_tsavo_east_national_park
+            camera_image: camera.kenya_tsavo_east_national_park
+            camera_view: live
+            fit_mode: contain
+            show_name: false
+            show_state: false
+          - type: markdown
+            content: >-
+              ## 📍 **{{ state_attr('camera.kenya_tsavo_east_national_park', 'friendly_name') }}**
+
+              _{{ state_attr('camera.kenya_tsavo_east_national_park', 'description') }}_
+
+              **🌍 Country:** {{ state_attr('camera.kenya_tsavo_east_national_park', 'country') }}
+
+              **📌 Region:** {{ state_attr('camera.kenya_tsavo_east_national_park', 'region') }}
+
+              **📍 Place:** {{ state_attr('camera.kenya_tsavo_east_national_park', 'place') }}
+
+              [🔗 View live webcam]({{ state_attr('camera.kenya_tsavo_east_national_park', 'source') }})
+
+      # 2. Schwangau - Neuschwanstein Castle
+      - type: grid
+        title: Schwangau
+        cards:
+          - type: picture-entity
+            entity: camera.schwangau_neuschwanstein_castle
+            camera_image: camera.schwangau_neuschwanstein_castle
+            camera_view: live
+            fit_mode: contain
+            show_name: false
+            show_state: false
+          - type: markdown
+            content: >-
+              ## 📍 **{{ state_attr('camera.schwangau_neuschwanstein_castle', 'friendly_name') }}**
+
+              _{{ state_attr('camera.schwangau_neuschwanstein_castle', 'description') }}_
+
+              **🌍 Country:** {{ state_attr('camera.schwangau_neuschwanstein_castle', 'country') }}
+
+              **📌 Region:** {{ state_attr('camera.schwangau_neuschwanstein_castle', 'region') }}
+
+              **📍 Place:** {{ state_attr('camera.schwangau_neuschwanstein_castle', 'place') }}
+
+              [🔗 View live webcam]({{ state_attr('camera.schwangau_neuschwanstein_castle', 'source') }})
+
+      # 3. Venice - St Mark Square
+      - type: grid
+        title: Venice
+        cards:
+          - type: picture-entity
+            entity: camera.venice_st_mark_square
+            camera_image: camera.venice_st_mark_square
+            camera_view: live
+            fit_mode: contain
+            show_name: false
+            show_state: false
+          - type: markdown
+            content: >-
+              ## 📍 **{{ state_attr('camera.venice_st_mark_square', 'friendly_name') }}**
+
+              _{{ state_attr('camera.venice_st_mark_square', 'description') }}_
+
+              **🌍 Country:** {{ state_attr('camera.venice_st_mark_square', 'country') }}
+
+              **📌 Region:** {{ state_attr('camera.venice_st_mark_square', 'region') }}
+
+              **📍 Place:** {{ state_attr('camera.venice_st_mark_square', 'place') }}
+
+              [🔗 View live webcam]({{ state_attr('camera.venice_st_mark_square', 'source') }})
+
+      # 4. Rome - Pantheon
+      - type: grid
+        title: Rome
+        cards:
+          - type: picture-entity
+            entity: camera.rome_pantheon
+            camera_image: camera.rome_pantheon
+            camera_view: live
+            fit_mode: contain
+            show_name: false
+            show_state: false
+          - type: markdown
+            content: >-
+              ## 📍 **{{ state_attr('camera.rome_pantheon', 'friendly_name') }}**
+
+              _{{ state_attr('camera.rome_pantheon', 'description') }}_
+
+              **🌍 Country:** {{ state_attr('camera.rome_pantheon', 'country') }}
+
+              **📌 Region:** {{ state_attr('camera.rome_pantheon', 'region') }}
+
+              **📍 Place:** {{ state_attr('camera.rome_pantheon', 'place') }}
+
+              [🔗 View live webcam]({{ state_attr('camera.rome_pantheon', 'source') }})
