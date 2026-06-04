@@ -23,6 +23,7 @@ describe('skyline-webcams-card', () => {
     expect(config).toEqual({
       entity: '',
       aspect_ratio: '16/9',
+      show_video_controls: true,
     });
   });
 

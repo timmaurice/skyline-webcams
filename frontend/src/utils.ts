@@ -4,7 +4,7 @@
  * @param type The event type (e.g., 'hass-more-info').
  * @param detail Optional detail object to include in the event.
  */
-export const fireEvent = (node: HTMLElement, type: string, detail?: any): void => {
+export const fireEvent = (node: HTMLElement, type: string, detail?: unknown): void => {
   const event = new CustomEvent(type, {
     bubbles: true,
     cancelable: false,
