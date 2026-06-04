@@ -15,7 +15,7 @@
     "declaration": false,
     "sourceMap": true,
     "lib": ["ES2022", "DOM"],
-    "types": ["node"]
+    "types": []
   },
   "include": ["src/**/*.ts", "src/declarations.d.ts"],
   "exclude": ["node_modules", "dist"]
