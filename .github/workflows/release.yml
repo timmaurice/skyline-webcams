@@ -73,6 +73,6 @@ jobs:
         with:
           tag_name: ${{ env.TAG_NAME }}
           name: "Version ${{ env.VERSION }}"
-          draft: false
+          draft: true
           generate_release_notes: true
           files: skylinewebcams.zip
