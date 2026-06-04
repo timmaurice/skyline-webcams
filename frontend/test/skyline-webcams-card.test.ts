@@ -92,4 +92,59 @@ describe('skyline-webcams-card', () => {
     expect(link).not.toBeNull();
     expect(link.href).toBe('http://example.com/webcam.html');
   });
+
+  it('renders video control buttons when valid state is provided', async () => {
+    el.setConfig({ entity: 'camera.test_cam' });
+    // @ts-expect-error Mocking minimal hass
+    el.hass = {
+      states: {
+        'camera.test_cam': {
+          state: 'idle',
+          attributes: { friendly_name: 'Test Cam', source: 'http://example.com' },
+        },
+      },
+      callWS: () => Promise.resolve({ url: '/api/mock' }),
+    };
+    await el.updateComplete;
+
+    const controls = el.shadowRoot?.querySelector('.video-controls');
+    expect(controls).not.toBeNull();
+
+    const buttons = el.shadowRoot?.querySelectorAll('.control-btn');
+    expect(buttons?.length).toBeGreaterThanOrEqual(2); // Play/Pause and Fullscreen
+  });
+
+  it('triggers control action handlers', async () => {
+    el.setConfig({ entity: 'camera.test_cam' });
+    // @ts-expect-error Mocking minimal hass
+    el.hass = {
+      states: {
+        'camera.test_cam': {
+          state: 'idle',
+          attributes: { friendly_name: 'Test Cam', source: 'http://example.com' },
+        },
+      },
+      callWS: () => Promise.resolve({ url: '/api/mock' }),
+    };
+    await el.updateComplete;
+
+    const playBtn = el.shadowRoot?.querySelector('.control-btn') as HTMLButtonElement;
+    expect(playBtn).not.toBeNull();
+
+    const mockEvent = new Event('click');
+    expect(() => {
+      // @ts-expect-error Testing private method
+      el._togglePlay(mockEvent);
+    }).not.toThrow();
+
+    expect(() => {
+      // @ts-expect-error Testing private method
+      el._togglePiP(mockEvent);
+    }).not.toThrow();
+
+    expect(() => {
+      // @ts-expect-error Testing private method
+      el._toggleFullscreen(mockEvent);
+    }).not.toThrow();
+  });
 });

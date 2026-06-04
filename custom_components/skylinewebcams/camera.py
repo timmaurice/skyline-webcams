@@ -9,6 +9,7 @@ import aiohttp
 import async_timeout
 from bs4 import BeautifulSoup
 from aiohttp import web
+from collections import OrderedDict
 
 from homeassistant.components.camera import Camera, CameraEntityFeature
 from homeassistant.components.ffmpeg import async_get_image
@@ -112,6 +113,22 @@ class SkylineWebcamsHlsProxyView(HomeAssistantView):
             if not target_url:
                 return web.Response(status=502, text="Failed to fetch stream URL")
 
+        is_ts_request = request.path.endswith(".ts") or (target_url and ".ts" in target_url)
+
+        if is_ts_request and target_url:
+            cached_data = camera.get_cached_ts(target_url)
+            if cached_data:
+                content_type, body_bytes = cached_data
+                _LOGGER.debug("[%s] Serving cached TS chunk for %s", camera.name, target_url)
+                return web.Response(
+                    body=body_bytes,
+                    content_type=content_type,
+                    headers={
+                        "Access-Control-Allow-Origin": "*",
+                        "Cache-Control": "public, max-age=3600"
+                    }
+                )
+
         headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
             "Referer": "https://www.skylinewebcams.com/",
@@ -164,6 +181,18 @@ class SkylineWebcamsHlsProxyView(HomeAssistantView):
                             headers={"Access-Control-Allow-Origin": "*"}
                         )
                     else:
+                        if is_ts_request and target_url:
+                            body_bytes = await resp.read()
+                            camera.put_cached_ts(target_url, content_type, body_bytes)
+                            return web.Response(
+                                body=body_bytes,
+                                content_type=content_type,
+                                headers={
+                                    "Access-Control-Allow-Origin": "*",
+                                    "Cache-Control": "public, max-age=3600"
+                                }
+                            )
+
                         # Stream the binary data incrementally
                         headers = {
                             "Content-Type": content_type,
@@ -217,11 +246,28 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
         self._additional_attributes = {"source": self._url}
         self._attr_available = True
         self._session = None
+        self._ts_cache = OrderedDict()
+        self._ts_cache_capacity = 15
         
     def get_session(self):
         if not self._session:
             self._session = async_create_clientsession(self.hass)
         return self._session
+
+    def get_cached_ts(self, url: str) -> tuple[str, bytes] | None:
+        """Get cached TS chunk."""
+        if url in self._ts_cache:
+            self._ts_cache.move_to_end(url)
+            return self._ts_cache[url]
+        return None
+
+    def put_cached_ts(self, url: str, content_type: str, data: bytes) -> None:
+        """Cache TS chunk."""
+        if url in self._ts_cache:
+            self._ts_cache.move_to_end(url)
+        self._ts_cache[url] = (content_type, data)
+        if len(self._ts_cache) > self._ts_cache_capacity:
+            self._ts_cache.popitem(last=False)
 
     async def async_added_to_hass(self) -> None:
         """Run when entity is added to hass."""

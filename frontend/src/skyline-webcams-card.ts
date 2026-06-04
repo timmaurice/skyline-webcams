@@ -24,11 +24,14 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
   @state() private _error?: string;
   @state() private _loading = false;
   @state() private _streamUrl?: string;
+  @state() private _isIntersecting = false;
 
   @query('video') private _videoEl?: HTMLVideoElement;
 
   private _hls?: Hls;
   private _visibilityListener?: () => void;
+  private _fullscreenListener?: () => void;
+  private _intersectionObserver?: IntersectionObserver;
 
   public setConfig(config: SkylineWebcamsCardConfig): void {
     if (!config || !config.entity) {
@@ -44,27 +47,51 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
   public connectedCallback(): void {
     super.connectedCallback();
 
-    if (this.hass && this._config?.entity) {
-      this._startStream();
+    // Set up IntersectionObserver to pause/resume playback when out of viewport
+    if (typeof IntersectionObserver !== 'undefined') {
+      this._intersectionObserver = new IntersectionObserver(
+        (entries) => {
+          const entry = entries[0];
+          const newIntersecting = entry.isIntersecting;
+          if (this._isIntersecting !== newIntersecting) {
+            this._isIntersecting = newIntersecting;
+            this._updatePlaybackState();
+          }
+        },
+        { threshold: 0.1 },
+      );
+      this._intersectionObserver.observe(this);
+    } else {
+      this._isIntersecting = true;
+      this._updatePlaybackState();
     }
 
     // Set up page visibility listener to refresh stream when tab becomes active
     this._visibilityListener = () => {
-      if (document.visibilityState === 'visible' && this._config?.entity) {
-        console.debug('skyline-webcams-card: tab active, refreshing stream');
-        this._startStream();
-      } else if (document.visibilityState === 'hidden') {
-        console.debug('skyline-webcams-card: tab hidden, stopping stream');
-        this._destroyHls();
-      }
+      this._updatePlaybackState();
     };
     document.addEventListener('visibilitychange', this._visibilityListener);
+
+    // Set up fullscreen listener to trigger updates and keep UI elements in sync
+    this._fullscreenListener = () => {
+      this.requestUpdate();
+    };
+    document.addEventListener('fullscreenchange', this._fullscreenListener);
   }
 
   public disconnectedCallback(): void {
     super.disconnectedCallback();
     if (this._visibilityListener) {
       document.removeEventListener('visibilitychange', this._visibilityListener);
+      this._visibilityListener = undefined;
+    }
+    if (this._fullscreenListener) {
+      document.removeEventListener('fullscreenchange', this._fullscreenListener);
+      this._fullscreenListener = undefined;
+    }
+    if (this._intersectionObserver) {
+      this._intersectionObserver.disconnect();
+      this._intersectionObserver = undefined;
     }
     this._destroyHls();
   }
@@ -75,7 +102,22 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
     if (changedProperties.has('_config')) {
       const oldConfig = changedProperties.get('_config') as SkylineWebcamsCardConfig | undefined;
       if (oldConfig?.entity !== this._config?.entity) {
+        this._updatePlaybackState();
+      }
+    }
+  }
+
+  private _updatePlaybackState(): void {
+    const shouldPlay = document.visibilityState === 'visible' && this._isIntersecting;
+    if (shouldPlay) {
+      if (!this._hls && !this._loading && !this._error && this.hass && this._config?.entity) {
+        console.debug('skyline-webcams-card: active and in viewport, starting stream');
         this._startStream();
+      }
+    } else {
+      if (this._hls || this._loading) {
+        console.debug('skyline-webcams-card: hidden or out of viewport, stopping stream');
+        this._destroyHls();
       }
     }
   }
@@ -180,14 +222,20 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         console.debug('skyline-webcams-card: manifest parsed, playing video');
-        video.play().catch((err) => {
-          if (err.name === 'AbortError') return;
-          video.muted = true;
-          video.play().catch((e) => {
-            if (e.name === 'AbortError') return;
-            console.error('skyline-webcams-card: failed to play even after muting', e);
+        const playPromise = video.play();
+        if (playPromise !== undefined) {
+          playPromise.catch((err) => {
+            if (err.name === 'AbortError') return;
+            video.muted = true;
+            const retryPromise = video.play();
+            if (retryPromise !== undefined) {
+              retryPromise.catch((e) => {
+                if (e.name === 'AbortError') return;
+                console.error('skyline-webcams-card: failed to play even after muting', e);
+              });
+            }
           });
-        });
+        }
       });
 
       hls.on(Hls.Events.ERROR, (event, data) => {
@@ -219,11 +267,17 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
       console.debug('skyline-webcams-card: using native HLS support');
       video.src = url;
       video.addEventListener('loadedmetadata', () => {
-        video.play().catch((err) => {
-          console.warn('skyline-webcams-card: native autoplay prevented, video muted', err);
-          video.muted = true;
-          video.play().catch((e) => console.error('skyline-webcams-card: native play failed', e));
-        });
+        const playPromise = video.play();
+        if (playPromise !== undefined) {
+          playPromise.catch((err) => {
+            console.warn('skyline-webcams-card: native autoplay prevented, video muted', err);
+            video.muted = true;
+            const retryPromise = video.play();
+            if (retryPromise !== undefined) {
+              retryPromise.catch((e) => console.error('skyline-webcams-card: native play failed', e));
+            }
+          });
+        }
       });
 
       video.onerror = () => {
@@ -237,6 +291,7 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
   }
 
   private _handleRetry(): void {
+    this._error = undefined;
     this._startStream();
   }
 
@@ -249,6 +304,66 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
         detail: { entityId: this._config.entity },
       });
       this.dispatchEvent(event);
+    }
+  }
+
+  private _isPiPSupported(): boolean {
+    return typeof document !== 'undefined' && 'pictureInPictureEnabled' in document && document.pictureInPictureEnabled;
+  }
+
+  private _togglePlay(e: Event): void {
+    e.stopPropagation();
+    const video = this._videoEl;
+    if (!video) return;
+
+    if (video.paused) {
+      if (this._hls) {
+        this._hls.startLoad();
+      }
+      const playPromise = video.play();
+      if (playPromise !== undefined) {
+        playPromise.catch((err) => {
+          if (err.name === 'AbortError') return;
+          console.error('skyline-webcams-card: failed to play video', err);
+        });
+      }
+    } else {
+      video.pause();
+      if (this._hls) {
+        this._hls.stopLoad();
+      }
+    }
+  }
+
+  private async _togglePiP(e: Event): Promise<void> {
+    e.stopPropagation();
+    const video = this._videoEl;
+    if (!video) return;
+
+    try {
+      if (document.pictureInPictureElement === video) {
+        await document.exitPictureInPicture();
+      } else {
+        await video.requestPictureInPicture();
+      }
+    } catch (err) {
+      console.error('skyline-webcams-card: failed to toggle PiP', err);
+    }
+  }
+
+  private async _toggleFullscreen(e: Event): Promise<void> {
+    e.stopPropagation();
+    const container = this.shadowRoot?.querySelector('.video-container');
+    if (!container) return;
+
+    try {
+      if (document.fullscreenElement === container) {
+        await document.exitFullscreen();
+      } else {
+        await container.requestFullscreen();
+      }
+    } catch (err) {
+      console.error('skyline-webcams-card: failed to toggle Fullscreen', err);
     }
   }
 
@@ -302,7 +417,41 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
               preload="auto"
               ?muted=${true}
               poster=${stateObj.attributes.poster || stateObj.attributes.entity_picture || ''}
+              @play=${() => this.requestUpdate()}
+              @pause=${() => this.requestUpdate()}
             ></video>
+
+            <div class="video-controls" @click=${(e: Event) => e.stopPropagation()}>
+              <button
+                class="control-btn"
+                @click=${this._togglePlay}
+                aria-label="${this._videoEl?.paused ? 'Play' : 'Pause'}"
+                title="${this._videoEl?.paused ? 'Play' : 'Pause'}"
+              >
+                <ha-icon icon="${this._videoEl?.paused ? 'mdi:play' : 'mdi:pause'}"></ha-icon>
+              </button>
+              <div class="spacer"></div>
+              ${this._isPiPSupported()
+                ? html`
+                    <button
+                      class="control-btn"
+                      @click=${this._togglePiP}
+                      aria-label="Picture-in-Picture"
+                      title="Picture-in-Picture"
+                    >
+                      <ha-icon icon="mdi:picture-in-picture-bottom-right"></ha-icon>
+                    </button>
+                  `
+                : ''}
+              <button
+                class="control-btn"
+                @click=${this._toggleFullscreen}
+                aria-label="${document.fullscreenElement ? 'Exit Fullscreen' : 'Fullscreen'}"
+                title="${document.fullscreenElement ? 'Exit Fullscreen' : 'Fullscreen'}"
+              >
+                <ha-icon icon="${document.fullscreenElement ? 'mdi:fullscreen-exit' : 'mdi:fullscreen'}"></ha-icon>
+              </button>
+            </div>
           </div>
 
           <div class="webcam-info">
