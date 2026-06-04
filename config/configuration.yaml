@@ -4,6 +4,9 @@ default_config:
 # Load Lovelace UI in YAML mode so we can pre-provision the dashboard
 lovelace:
   resource_mode: yaml
+  resources:
+    - url: /skylinewebcams_frontend/skyline-webcams-card.js
+      type: module
   dashboards:
     lovelace:
       mode: yaml
@@ -33,3 +36,7 @@ camera:
   - platform: skylinewebcams
     name: "Rome - Pantheon"
     url: "https://www.skylinewebcams.com/en/webcam/italia/lazio/roma/pantheon.html"
+
+  - platform: skylinewebcams
+    name: "Shanghai - Skyline"
+    url: "https://www.skylinewebcams.com/en/webcam/china/shanghai/shanghai/skyline-of-shanghai.html"

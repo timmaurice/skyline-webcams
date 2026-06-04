@@ -100,14 +100,35 @@ camera:
 |          |                        | `place`       | Schwangau                                                                      |
 |          |                        | `source`      | `https://www.skylinewebcams.com/..`                                            |
 
-### Card example
+### Lovelace Card
+
+This integration includes a dedicated custom Lovelace card: `custom:skyline-webcams-card`.
 
 <img src="https://raw.githubusercontent.com/timmaurice/skyline-webcams/main/image.png" alt="Card Screenshot" />
 
-<details>
-<summary>Code</summary>
+#### Card Configuration
 
+| Name           | Type   | Default      | Description                                                                 |
+| :------------- | :----- | :----------- | :-------------------------------------------------------------------------- |
+| `type`         | string | **Required** | `custom:skyline-webcams-card`                                               |
+| `entity`       | string | **Required** | The camera entity (e.g., `camera.live_cam_schwangau_neuschwanstein_castle`) |
+| `title`        | string | `(none)`     | Custom title for the card (falls back to entity friendly name if omitted)   |
+| `aspect_ratio` | string | `16/9`       | Aspect ratio of the video player container (e.g., `16/9`, `4/3`)            |
+
+#### Example YAML
+
+```yaml
+type: custom:skyline-webcams-card
+entity: camera.live_cam_schwangau_neuschwanstein_castle
+aspect_ratio: 16/9
 ```
+
+<details>
+<summary>Alternative Generic Card configuration</summary>
+
+If you prefer not to use the custom card, you can combine Home Assistant's built-in `picture-entity` and `markdown` cards:
+
+```yaml
 type: picture-entity
 entity: camera.live_cam_schwangau_neuschwanstein_castle
 camera_image: camera.live_cam_schwangau_neuschwanstein_castle
@@ -118,20 +139,18 @@ show_state: false
 
 type: markdown
 content: >-
+  ## 📍 **{{ state_attr('camera.live_cam_schwangau_neuschwanstein_castle', 'friendly_name') }}**
 
-## 📍 **{{ state_attr('camera.live_cam_schwangau_neuschwanstein_castle', 'friendly_name') }}**
+  _{{ state_attr('camera.live_cam_schwangau_neuschwanstein_castle', 'description') }}_
 
-_{{ state_attr('camera.live_cam_schwangau_neuschwanstein_castle', 'description') }}_
+  **🌍 Country:** {{ state_attr('camera.live_cam_schwangau_neuschwanstein_castle', 'country') }}
 
-**🌍 Country:** {{ state_attr('camera.live_cam_schwangau_neuschwanstein_castle', 'country') }}
+  **📌 Region:** {{ state_attr('camera.live_cam_schwangau_neuschwanstein_castle', 'region') }}
 
-**📌 Region:** {{ state_attr('camera.live_cam_schwangau_neuschwanstein_castle', 'region') }}
+  **📍 Place:** {{ state_attr('camera.live_cam_schwangau_neuschwanstein_castle', 'place') }}
 
-**📍 Place:** {{ state_attr('camera.live_cam_schwangau_neuschwanstein_castle', 'place') }}
-
-[🔗 View live webcam]({{ state_attr('camera.live_cam_schwangau_neuschwanstein_castle', 'source') }})
+  [🔗 View live webcam]({{ state_attr('camera.live_cam_schwangau_neuschwanstein_castle', 'source') }})
 text_only: true
-
 ```
 
 </details>

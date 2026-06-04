@@ -19,6 +19,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.network import get_url
+from homeassistant.helpers.aiohttp_client import async_create_clientsession
+import aiohttp
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
 
@@ -34,6 +36,11 @@ PLATFORM_SCHEMA = cv.PLATFORM_SCHEMA.extend(
 )
 
 
+def _init_domain_data(hass: HomeAssistant) -> None:
+    if DOMAIN not in hass.data:
+        hass.data[DOMAIN] = {}
+        hass.http.register_view(SkylineWebcamsHlsProxyView(hass))
+
 async def async_setup_platform(
     hass: HomeAssistant,
     config: dict,
@@ -41,9 +48,7 @@ async def async_setup_platform(
     discovery_info: dict | None = None,
 ) -> None:
     """Set up SkylineWebcams camera from YAML configuration."""
-    if DOMAIN not in hass.data:
-        hass.data[DOMAIN] = {}
-        hass.http.register_view(SkylineWebcamsProxyView(hass))
+    _init_domain_data(hass)
 
     import hashlib
     url = config[CONF_URL]
@@ -65,10 +70,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up SkylineWebcams camera from a config entry."""
-    # Register the internal proxy view if it hasn't been created yet
-    if DOMAIN not in hass.data:
-        hass.data[DOMAIN] = {}
-        hass.http.register_view(SkylineWebcamsProxyView(hass))
+    _init_domain_data(hass)
 
     camera = SkylineWebcamsCamera(
         hass, 
@@ -81,11 +83,11 @@ async def async_setup_entry(
     async_add_entities([camera], True)
 
 
-class SkylineWebcamsProxyView(HomeAssistantView):
-    """View to provide a dynamic redirect to the latest stream URL."""
+class SkylineWebcamsHlsProxyView(HomeAssistantView):
+    """View to proxy HLS stream directly to bypass Referer checks."""
 
-    url = "/api/skylinewebcams/{entry_id}"
-    name = "api:skylinewebcams"
+    url = "/api/skylinewebcams_proxy/{entry_id}"
+    name = "api:skylinewebcams_proxy"
     requires_auth = False
 
     def __init__(self, hass: HomeAssistant) -> None:
@@ -93,23 +95,99 @@ class SkylineWebcamsProxyView(HomeAssistantView):
         self.hass = hass
 
     async def get(self, request: web.Request, entry_id: str) -> web.Response:
-        """Handle GET request to return a 302 redirect to the fresh stream."""
-        # Try both entry_id and unique_id (for YAML)
-        camera: SkylineWebcamsCamera | None = self.hass.data.get(DOMAIN, {}).get(
-            entry_id
-        )
+        """Handle GET request to proxy the stream."""
+        if entry_id.endswith(".m3u8"):
+            entry_id = entry_id[:-5]
+        elif entry_id.endswith(".ts"):
+            entry_id = entry_id[:-3]
 
+        camera = self.hass.data.get(DOMAIN, {}).get(entry_id)
         if not camera:
             return web.Response(status=404, text="Camera not found")
 
-        stream_url = await camera.get_fresh_stream_url()
-        if not stream_url:
-            return web.Response(
-                status=502, text="Failed to fetch stream URL from provider"
-            )
+        target_url = request.query.get("url")
+        
+        if not target_url:
+            target_url = await camera.get_fresh_stream_url()
+            if not target_url:
+                return web.Response(status=502, text="Failed to fetch stream URL")
 
-        # Redirect the HA Stream Worker to the actual, freshly-tokenized stream URL
-        raise web.HTTPFound(stream_url)
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+            "Referer": "https://www.skylinewebcams.com/",
+            "Accept": "*/*"
+        }
+
+        try:
+            session = camera.get_session()
+            async with session.get(target_url, headers=headers) as resp:
+                    if resp.status != 200:
+                        return web.Response(status=resp.status, text="Proxy fetch failed")
+
+                    content_type = resp.headers.get("Content-Type", "")
+                    
+                    if "mpegurl" in content_type.lower() or target_url.endswith(".m3u8"):
+                        # Rewrite the M3U8 playlist
+                        text = await resp.text()
+                        
+                        # Check if token is expired (empty playlist or copyright violation)
+                        if "copyright_violation" in text or ".ts" not in text:
+                            # Token is invalid, force refresh
+                            camera._last_update = 0
+                            target_url = await camera.get_fresh_stream_url()
+                            if not target_url:
+                                return web.Response(status=502, text="Failed to fetch fresh stream URL")
+                            
+                            # Retry fetch
+                            async with session.get(target_url, headers=headers) as retry_resp:
+                                if retry_resp.status != 200:
+                                    return web.Response(status=retry_resp.status, text="Proxy retry fetch failed")
+                                text = await retry_resp.text()
+                        rewritten_lines = []
+                        from urllib.parse import urljoin, quote, urlparse
+                        parsed_target = urlparse(target_url)
+                        for line in text.splitlines():
+                            line = line.strip()
+                            if line and not line.startswith('#'):
+                                chunk_url = urljoin(target_url, line)
+                                parsed_chunk = urlparse(chunk_url)
+                                if not parsed_chunk.query and parsed_target.query:
+                                    chunk_url = f"{chunk_url}?{parsed_target.query}"
+                                encoded_url = quote(chunk_url, safe='')
+                                rewritten_lines.append(f"/api/skylinewebcams_proxy/{entry_id}.ts?url={encoded_url}")
+                            else:
+                                rewritten_lines.append(line)
+                        
+                        return web.Response(
+                            body='\n'.join(rewritten_lines).encode("utf-8"),
+                            content_type="application/vnd.apple.mpegurl",
+                            headers={"Access-Control-Allow-Origin": "*"}
+                        )
+                    else:
+                        # Stream the binary data incrementally
+                        headers = {
+                            "Content-Type": content_type,
+                            "Access-Control-Allow-Origin": "*",
+                            "Cache-Control": "public, max-age=3600"
+                        }
+                        if "Content-Length" in resp.headers:
+                            headers["Content-Length"] = resp.headers["Content-Length"]
+                            
+                        response = web.StreamResponse(
+                            status=200,
+                            reason='OK',
+                            headers=headers
+                        )
+                        await response.prepare(request)
+                        
+                        async for chunk in resp.content.iter_chunked(4096):
+                            await response.write(chunk)
+                            
+                        await response.write_eof()
+                        return response
+        except Exception as e:
+            return web.Response(status=500, text=str(e))
+
 
 
 class SkylineWebcamsCamera(Camera, RestoreEntity):
@@ -138,6 +216,12 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
         self._last_update = 0
         self._additional_attributes = {"source": self._url}
         self._attr_available = True
+        self._session = None
+        
+    def get_session(self):
+        if not self._session:
+            self._session = async_create_clientsession(self.hass)
+        return self._session
 
     async def async_added_to_hass(self) -> None:
         """Run when entity is added to hass."""
@@ -145,10 +229,11 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
         _LOGGER.debug("[%s] Entity added to Home Assistant", self._attr_name)
 
         if (old_state := await self.async_get_last_state()) is not None:
-            for attr in ["description", "country", "region", "place"]:
+            for attr in ["description", "country", "region", "place", "poster"]:
                 if attr in old_state.attributes:
                     self._additional_attributes[attr] = old_state.attributes[attr]
 
+        self.hass.async_create_task(self.get_fresh_stream_url())
         self.async_schedule_update_ha_state(True)
 
     async def async_will_remove_from_hass(self) -> None:
@@ -168,7 +253,9 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
     @property
     def extra_state_attributes(self):
         """Return the state attributes."""
-        return self._additional_attributes
+        attrs = self._additional_attributes.copy()
+        attrs["entry_id"] = self._entry_id
+        return attrs
 
     @property
     def is_streaming(self) -> bool:
@@ -183,18 +270,23 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
     async def async_camera_image(
         self, width: int | None = None, height: int | None = None
     ) -> bytes | None:
-        """Return a still image response directly using a fresh URL."""
-        stream_url = await self.get_fresh_stream_url()
-        if not stream_url:
+        """Return a still image response directly using the page poster."""
+        if "poster" not in self._additional_attributes:
+            await self.get_fresh_stream_url()
+
+        poster_url = self._additional_attributes.get("poster")
+        if not poster_url:
             return None
 
-        return await async_get_image(
-            self.hass,
-            stream_url,
-            extra_cmd=self.ffmpeg_arguments,
-            width=width,
-            height=height,
-        )
+        try:
+            session = self.get_session()
+            async with async_timeout.timeout(10):
+                async with session.get(poster_url) as response:
+                        if response.status == 200:
+                            return await response.read()
+        except Exception as err:
+            _LOGGER.error("[%s] Failed to fetch camera image: %s", self._attr_name, err)
+        return None
 
     async def stream_source(self) -> str | None:
         """Provide the local proxy URL to Home Assistant's stream worker."""
@@ -205,7 +297,7 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
         except Exception:
             base_url = "http://127.0.0.1:8123"
 
-        proxy_url = f"{base_url}/api/skylinewebcams/{self._entry_id}"
+        proxy_url = f"{base_url}/api/skylinewebcams_proxy/{self._entry_id}.m3u8"
         _LOGGER.debug(
             "[%s] Providing proxy stream URL to HA worker: %s",
             self._attr_name,
@@ -214,11 +306,10 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
         return proxy_url
 
     async def get_fresh_stream_url(self) -> str | None:
-        """Get a fresh URL, caching it briefly to avoid spamming the provider."""
+        """Get a fresh URL, caching it for 2 minutes to avoid rate limits."""
         now = asyncio.get_event_loop().time()
 
-        # Cache the token for 60 seconds to prevent scraping Skyline multiple times a minute
-        if self._stream_url and (now - self._last_update < 60):
+        if self._stream_url and (now - self._last_update < 120):
             return self._stream_url
 
         url = await self._fetch_stream_url()
@@ -240,9 +331,9 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
         }
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with async_timeout.timeout(20):
-                    async with session.get(self._url, headers=headers) as response:
+            session = self.get_session()
+            async with async_timeout.timeout(20):
+                async with session.get(self._url, headers=headers) as response:
                         if response.status != 200:
                             self._attr_available = False
                             return None
@@ -256,6 +347,9 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
                             self._additional_attributes["description"] = h2.get_text(
                                 strip=True
                             )
+
+                        if og_img := soup.find("meta", attrs={"property": "og:image"}):
+                            self._additional_attributes["poster"] = og_img.get("content")
 
                         if breadcrumb := soup.find("ol", class_="breadcrumb"):
                             items = breadcrumb.find_all("li")
@@ -294,6 +388,8 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
                         if "livee.m3u8" in stream_path:
                             stream_path = stream_path.replace("livee.m3u8", "live.m3u8")
 
+                        if self.entity_id:
+                            self.async_write_ha_state()
                         return f"https://hd-auth.skylinewebcams.com/{stream_path}"
 
         except (aiohttp.ClientError, asyncio.TimeoutError) as err:
@@ -301,4 +397,6 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
                 "[%s] Network error while fetching stream URL: %s", self._attr_name, err
             )
             self._attr_available = False
+            if self.entity_id:
+                self.async_write_ha_state()
             return None

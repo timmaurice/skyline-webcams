@@ -9,5 +9,5 @@
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/timmaurice/skyline-webcams/issues",
   "requirements": ["beautifulsoup4>=4.14.3"],
-  "version": "1.0.0"
+  "version": "1.0.3"
 }

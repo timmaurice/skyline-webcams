@@ -1,12 +1,12 @@
 services:
   homeassistant:
-    container_name: hass_skyline_webcams
-    image: "ghcr.io/home-assistant/home-assistant:latest"
+    container_name: ha-skyline-webcams-test
+    image: homeassistant/home-assistant:stable
     volumes:
       - ./config:/config
       - ./custom_components/skylinewebcams:/config/custom_components/skylinewebcams
     environment:
       - TZ=Europe/Berlin
     ports:
-      - "8123:8123"
+      - "8131:8123"
     restart: "no"

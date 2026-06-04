@@ -1,0 +1,163 @@
+:host {
+  display: block;
+}
+
+.card-content {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.video-container {
+  position: relative;
+  width: 100%;
+  background: #000;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  z-index: 2;
+  transition: opacity 0.3s ease;
+}
+
+.loading-overlay {
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.error-overlay {
+  background: rgba(0, 0, 0, 0.8);
+  color: #fff;
+  padding: 20px;
+  text-align: center;
+}
+
+.error-msg {
+  font-size: 1rem;
+  font-weight: 500;
+  margin-bottom: 12px;
+  color: #ff5252;
+}
+
+.retry-btn {
+  background: var(--accent-color, #03a9f4);
+  color: #fff;
+  border: none;
+  padding: 8px 20px;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+  transition:
+    background-color 0.2s ease,
+    transform 0.1s ease;
+
+  &:hover {
+    background: var(--primary-color, #0288d1);
+  }
+
+  &:active {
+    transform: scale(0.98);
+  }
+}
+
+.spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid rgba(255, 255, 255, 0.1);
+  border-left-color: var(--accent-color, #03a9f4);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+.webcam-info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.webcam-title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 500;
+  color: var(--primary-text-color);
+}
+
+.webcam-location {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--secondary-text-color);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+
+  ha-icon {
+    --mdc-icon-size: 16px;
+  }
+}
+
+.webcam-description {
+  margin: 4px 0 0 0;
+  font-size: 0.85rem;
+  color: var(--secondary-text-color);
+  line-height: 1.4;
+}
+
+.error-container {
+  color: var(--error-color, #db4437);
+  padding: 16px;
+  text-align: center;
+  font-weight: 500;
+}
+
+.webcam-source-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--primary-color, #03a9f4);
+  text-decoration: none;
+  font-size: 0.85rem;
+  font-weight: 500;
+  margin-top: 8px;
+  transition: color 0.2s ease;
+
+  &:hover {
+    color: var(--accent-color, #0288d1);
+    text-decoration: underline;
+  }
+
+  ha-icon {
+    --mdc-icon-size: 16px;
+  }
+}

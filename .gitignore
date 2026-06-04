@@ -4,15 +4,21 @@ __pycache__
 .DS_Store
 
 # Home Assistant test config runtime files
-config/.HA_VERSION
-config/.cloud/
-config/.storage/
-config/deps/
-config/home-assistant.log*
-config/home-assistant_v2.db*
-config/secrets.yaml
-config/tts/
-config/blueprints/
-config/.ha_run.lock
-config/.cache/
+config/*
+!config/configuration.yaml
+!config/ui-lovelace.yaml
 .cache/
+
+# OS / IDE
+.DS_Store
+.vscode/
+GEMINI.md
+
+# Python Virtual Environments
+venv/
+.venv/
+
+# Frontend Dependencies
+node_modules
+bun.lock
+yarn.lock
