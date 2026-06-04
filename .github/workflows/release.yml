@@ -11,30 +11,68 @@ jobs:
     permissions:
       contents: write
     steps:
-      # 1. Checkout code
+      # 1. Checkout main branch directly
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: main
 
-      # 2. Get version from tag
+      # 2. Extract version from tag (e.g., v1.0.3 -> 1.0.3)
       - name: Get version from tag
-        id: get_version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+        run: |
+          TAG_NAME="${{ github.ref_name }}"
+          # Strip leading 'v' if present
+          VERSION="${TAG_NAME#v}"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
 
-      # 3. Create ZIP in repo root (only skylinewebcams folder)
+      # 3. Update package.json and manifest.json version fields
+      - name: Update version in files
+        run: |
+          jq --arg ver "${{ env.VERSION }}" '.version = $ver' package.json > package.json.tmp && mv package.json.tmp package.json
+          jq --arg ver "${{ env.VERSION }}" '.version = $ver' custom_components/skylinewebcams/manifest.json > custom_components/skylinewebcams/manifest.json.tmp && mv custom_components/skylinewebcams/manifest.json.tmp custom_components/skylinewebcams/manifest.json
+
+      # 4. Set up Node.js
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: 'npm'
+
+      # 5. Build frontend card
+      - name: Build frontend card
+        run: |
+          npm ci
+          npm run build
+
+      # 6. Commit and push updated files to main
+      - name: Commit and push changes
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.json custom_components/skylinewebcams/manifest.json custom_components/skylinewebcams/skyline-webcams-card.js
+          git commit -m "chore: bump version to ${{ env.VERSION }} [skip ci]" || echo "No changes to commit"
+          git push origin main
+
+      # 7. Force update tag to point to the new commit
+      - name: Force update tag
+        run: |
+          git tag -f ${{ env.TAG_NAME }}
+          git push origin :refs/tags/${{ env.TAG_NAME }}
+          git push origin ${{ env.TAG_NAME }}
+
+      # 8. Create ZIP in repo root (only skylinewebcams folder)
       - name: Create zip archive for HACS
         run: |
           cd custom_components/skylinewebcams
           zip -r ../../skylinewebcams.zip . -x "*.DS_Store" "**/__pycache__/*"
 
-      # 4. Verify ZIP exists
-      - name: List files
-        run: ls -l skylinewebcams.zip
-
-      # 5. Create GitHub Release and attach ZIP
+      # 9. Create GitHub Release and attach ZIP
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: ${{ github.ref }}
+          tag_name: ${{ env.TAG_NAME }}
           name: "Version ${{ env.VERSION }}"
-          draft: true
+          draft: false
           generate_release_notes: true
           files: skylinewebcams.zip
