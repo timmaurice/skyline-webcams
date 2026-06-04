@@ -7,7 +7,8 @@ on:
     branches: ["main", "master"]
 
 jobs:
-  test:
+  python-tests:
+    name: Python Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -26,3 +27,30 @@ jobs:
         run: |
           # Run the full test suite offline. Network calls are blocked by pytest-socket
           PYTHONPATH=. pytest custom_components/skylinewebcams/tests
+
+  frontend-tests:
+    name: Frontend Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check formatting
+        run: npm run check-format
+
+      - name: Run linter
+        run: npm run lint
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Build bundle
+        run: npm run build
