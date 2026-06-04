@@ -1,0 +1,15 @@
+# Dependencies
+node_modules/
+dist/
+
+# Python caches
+.pytest_cache/
+__pycache__/
+*.pyc
+
+# Lovelace compiled bundle
+custom_components/skylinewebcams/skyline-webcams-card.js
+
+# Lock files and system files
+package-lock.json
+.DS_Store

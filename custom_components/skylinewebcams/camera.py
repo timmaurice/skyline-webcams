@@ -6,7 +6,6 @@ import logging
 import asyncio
 import re
 import aiohttp
-import async_timeout
 from bs4 import BeautifulSoup
 from aiohttp import web
 from collections import OrderedDict
@@ -42,6 +41,7 @@ def _init_domain_data(hass: HomeAssistant) -> None:
         hass.data[DOMAIN] = {}
         hass.http.register_view(SkylineWebcamsHlsProxyView(hass))
 
+
 async def async_setup_platform(
     hass: HomeAssistant,
     config: dict,
@@ -52,9 +52,10 @@ async def async_setup_platform(
     _init_domain_data(hass)
 
     import hashlib
+
     url = config[CONF_URL]
     name = config.get(CONF_NAME, "Skyline Webcam")
-    
+
     # Use URL as unique_id for YAML as well
     unique_id = url
     # For YAML, we use a hash of the URL as the entry_id for safe proxy routing
@@ -74,11 +75,7 @@ async def async_setup_entry(
     _init_domain_data(hass)
 
     camera = SkylineWebcamsCamera(
-        hass, 
-        entry.data[CONF_URL], 
-        entry.title, 
-        entry.unique_id, 
-        entry.entry_id
+        hass, entry.data[CONF_URL], entry.title, entry.unique_id, entry.entry_id
     )
     hass.data[DOMAIN][entry.entry_id] = camera
     async_add_entities([camera], True)
@@ -107,116 +104,127 @@ class SkylineWebcamsHlsProxyView(HomeAssistantView):
             return web.Response(status=404, text="Camera not found")
 
         target_url = request.query.get("url")
-        
+
         if not target_url:
             target_url = await camera.get_fresh_stream_url()
             if not target_url:
                 return web.Response(status=502, text="Failed to fetch stream URL")
 
-        is_ts_request = request.path.endswith(".ts") or (target_url and ".ts" in target_url)
+        is_ts_request = request.path.endswith(".ts") or (
+            target_url and ".ts" in target_url
+        )
 
         if is_ts_request and target_url:
             cached_data = camera.get_cached_ts(target_url)
             if cached_data:
                 content_type, body_bytes = cached_data
-                _LOGGER.debug("[%s] Serving cached TS chunk for %s", camera.name, target_url)
+                _LOGGER.debug(
+                    "[%s] Serving cached TS chunk for %s", camera.name, target_url
+                )
                 return web.Response(
                     body=body_bytes,
                     content_type=content_type,
                     headers={
                         "Access-Control-Allow-Origin": "*",
-                        "Cache-Control": "public, max-age=3600"
-                    }
+                        "Cache-Control": "public, max-age=3600",
+                    },
                 )
 
         headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
             "Referer": "https://www.skylinewebcams.com/",
-            "Accept": "*/*"
+            "Accept": "*/*",
         }
 
         try:
             session = camera.get_session()
             async with session.get(target_url, headers=headers) as resp:
-                    if resp.status != 200:
-                        return web.Response(status=resp.status, text="Proxy fetch failed")
+                if resp.status != 200:
+                    return web.Response(status=resp.status, text="Proxy fetch failed")
 
-                    content_type = resp.headers.get("Content-Type", "")
-                    
-                    if "mpegurl" in content_type.lower() or target_url.endswith(".m3u8"):
-                        # Rewrite the M3U8 playlist
-                        text = await resp.text()
-                        
-                        # Check if token is expired (empty playlist or copyright violation)
-                        if "copyright_violation" in text or ".ts" not in text:
-                            # Token is invalid, force refresh
-                            camera._last_update = 0
-                            target_url = await camera.get_fresh_stream_url()
-                            if not target_url:
-                                return web.Response(status=502, text="Failed to fetch fresh stream URL")
-                            
-                            # Retry fetch
-                            async with session.get(target_url, headers=headers) as retry_resp:
-                                if retry_resp.status != 200:
-                                    return web.Response(status=retry_resp.status, text="Proxy retry fetch failed")
-                                text = await retry_resp.text()
-                        rewritten_lines = []
-                        from urllib.parse import urljoin, quote, urlparse
-                        parsed_target = urlparse(target_url)
-                        for line in text.splitlines():
-                            line = line.strip()
-                            if line and not line.startswith('#'):
-                                chunk_url = urljoin(target_url, line)
-                                parsed_chunk = urlparse(chunk_url)
-                                if not parsed_chunk.query and parsed_target.query:
-                                    chunk_url = f"{chunk_url}?{parsed_target.query}"
-                                encoded_url = quote(chunk_url, safe='')
-                                rewritten_lines.append(f"/api/skylinewebcams_proxy/{entry_id}.ts?url={encoded_url}")
-                            else:
-                                rewritten_lines.append(line)
-                        
-                        return web.Response(
-                            body='\n'.join(rewritten_lines).encode("utf-8"),
-                            content_type="application/vnd.apple.mpegurl",
-                            headers={"Access-Control-Allow-Origin": "*"}
-                        )
-                    else:
-                        if is_ts_request and target_url:
-                            body_bytes = await resp.read()
-                            camera.put_cached_ts(target_url, content_type, body_bytes)
+                content_type = resp.headers.get("Content-Type", "")
+
+                if "mpegurl" in content_type.lower() or target_url.endswith(".m3u8"):
+                    # Rewrite the M3U8 playlist
+                    text = await resp.text()
+
+                    # Check if token is expired (empty playlist or copyright violation)
+                    if "copyright_violation" in text or ".ts" not in text:
+                        # Token is invalid, force refresh
+                        camera._last_update = 0
+                        target_url = await camera.get_fresh_stream_url()
+                        if not target_url:
                             return web.Response(
-                                body=body_bytes,
-                                content_type=content_type,
-                                headers={
-                                    "Access-Control-Allow-Origin": "*",
-                                    "Cache-Control": "public, max-age=3600"
-                                }
+                                status=502, text="Failed to fetch fresh stream URL"
                             )
 
-                        # Stream the binary data incrementally
-                        headers = {
-                            "Content-Type": content_type,
-                            "Access-Control-Allow-Origin": "*",
-                            "Cache-Control": "public, max-age=3600"
-                        }
-                        if "Content-Length" in resp.headers:
-                            headers["Content-Length"] = resp.headers["Content-Length"]
-                            
-                        response = web.StreamResponse(
-                            status=200,
-                            reason='OK',
-                            headers=headers
+                        # Retry fetch
+                        async with session.get(
+                            target_url, headers=headers
+                        ) as retry_resp:
+                            if retry_resp.status != 200:
+                                return web.Response(
+                                    status=retry_resp.status,
+                                    text="Proxy retry fetch failed",
+                                )
+                            text = await retry_resp.text()
+                    rewritten_lines = []
+                    from urllib.parse import urljoin, quote, urlparse
+
+                    parsed_target = urlparse(target_url)
+                    for line in text.splitlines():
+                        line = line.strip()
+                        if line and not line.startswith("#"):
+                            chunk_url = urljoin(target_url, line)
+                            parsed_chunk = urlparse(chunk_url)
+                            if not parsed_chunk.query and parsed_target.query:
+                                chunk_url = f"{chunk_url}?{parsed_target.query}"
+                            encoded_url = quote(chunk_url, safe="")
+                            rewritten_lines.append(
+                                f"/api/skylinewebcams_proxy/{entry_id}.ts?url={encoded_url}"
+                            )
+                        else:
+                            rewritten_lines.append(line)
+
+                    return web.Response(
+                        body="\n".join(rewritten_lines).encode("utf-8"),
+                        content_type="application/vnd.apple.mpegurl",
+                        headers={"Access-Control-Allow-Origin": "*"},
+                    )
+                else:
+                    if is_ts_request and target_url:
+                        body_bytes = await resp.read()
+                        camera.put_cached_ts(target_url, content_type, body_bytes)
+                        return web.Response(
+                            body=body_bytes,
+                            content_type=content_type,
+                            headers={
+                                "Access-Control-Allow-Origin": "*",
+                                "Cache-Control": "public, max-age=3600",
+                            },
                         )
-                        await response.prepare(request)
-                        
-                        async for chunk in resp.content.iter_chunked(4096):
-                            await response.write(chunk)
-                            
-                        await response.write_eof()
-                        return response
+
+                    # Stream the binary data incrementally
+                    headers = {
+                        "Content-Type": content_type,
+                        "Access-Control-Allow-Origin": "*",
+                        "Cache-Control": "public, max-age=3600",
+                    }
+                    if "Content-Length" in resp.headers:
+                        headers["Content-Length"] = resp.headers["Content-Length"]
+
+                    response = web.StreamResponse(
+                        status=200, reason="OK", headers=headers
+                    )
+                    await response.prepare(request)
+
+                    async for chunk in resp.content.iter_chunked(4096):
+                        await response.write(chunk)
+
+                    await response.write_eof()
+                    return response
         except Exception as e:
             return web.Response(status=500, text=str(e))
-
 
 
 class SkylineWebcamsCamera(Camera, RestoreEntity):
@@ -227,12 +235,12 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
     _attr_icon = "mdi:webcam"
 
     def __init__(
-        self, 
-        hass: HomeAssistant, 
-        url: str, 
-        name: str, 
-        unique_id: str | None, 
-        entry_id: str
+        self,
+        hass: HomeAssistant,
+        url: str,
+        name: str,
+        unique_id: str | None,
+        entry_id: str,
     ) -> None:
         """Initialize the camera."""
         super().__init__()
@@ -248,7 +256,7 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
         self._session = None
         self._ts_cache = OrderedDict()
         self._ts_cache_capacity = 15
-        
+
     def get_session(self):
         if not self._session:
             self._session = async_create_clientsession(self.hass)
@@ -326,10 +334,10 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
 
         try:
             session = self.get_session()
-            async with async_timeout.timeout(10):
+            async with asyncio.timeout(10):
                 async with session.get(poster_url) as response:
-                        if response.status == 200:
-                            return await response.read()
+                    if response.status == 200:
+                        return await response.read()
         except Exception as err:
             _LOGGER.error("[%s] Failed to fetch camera image: %s", self._attr_name, err)
         return None
@@ -378,65 +386,65 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
 
         try:
             session = self.get_session()
-            async with async_timeout.timeout(20):
+            async with asyncio.timeout(20):
                 async with session.get(self._url, headers=headers) as response:
-                        if response.status != 200:
-                            self._attr_available = False
-                            return None
+                    if response.status != 200:
+                        self._attr_available = False
+                        return None
 
-                        self._attr_available = True
-                        text = await response.text()
-                        soup = BeautifulSoup(text, "html.parser")
+                    self._attr_available = True
+                    text = await response.text()
+                    soup = BeautifulSoup(text, "html.parser")
 
-                        # Extract metadata
-                        if h2 := soup.find("h2"):
-                            self._additional_attributes["description"] = h2.get_text(
-                                strip=True
-                            )
+                    # Extract metadata
+                    if h2 := soup.find("h2"):
+                        self._additional_attributes["description"] = h2.get_text(
+                            strip=True
+                        )
 
-                        if og_img := soup.find("meta", attrs={"property": "og:image"}):
-                            self._additional_attributes["poster"] = og_img.get("content")
+                    if og_img := soup.find("meta", attrs={"property": "og:image"}):
+                        self._additional_attributes["poster"] = og_img.get("content")
 
-                        if breadcrumb := soup.find("ol", class_="breadcrumb"):
-                            items = breadcrumb.find_all("li")
-                            try:
-                                if len(items) > 1:
-                                    self._additional_attributes["country"] = items[
-                                        1
-                                    ].get_text(strip=True)
-                                if len(items) > 2:
-                                    self._additional_attributes["region"] = items[
-                                        2
-                                    ].get_text(strip=True)
-                                if len(items) > 3:
-                                    self._additional_attributes["place"] = items[
-                                        3
-                                    ].get_text(strip=True)
-                            except (IndexError, AttributeError):
-                                pass
+                    if breadcrumb := soup.find("ol", class_="breadcrumb"):
+                        items = breadcrumb.find_all("li")
+                        try:
+                            if len(items) > 1:
+                                self._additional_attributes["country"] = items[
+                                    1
+                                ].get_text(strip=True)
+                            if len(items) > 2:
+                                self._additional_attributes["region"] = items[
+                                    2
+                                ].get_text(strip=True)
+                            if len(items) > 3:
+                                self._additional_attributes["place"] = items[
+                                    3
+                                ].get_text(strip=True)
+                        except (IndexError, AttributeError):
+                            pass
 
-                        # Find stream source
-                        patterns = [
-                            r"source\s*:\s*['\"]([^'\"]*\.m3u8\?a=[^'\"]+)['\"]",
-                            r"['\"]([^'\"]*live[^'\"]*\.m3u8\?a=[^'\"]+)['\"]",
-                            r"(live[^'\"]*\.m3u8\?a=[^\s&\"']+)",
-                        ]
+                    # Find stream source
+                    patterns = [
+                        r"source\s*:\s*['\"]([^'\"]*\.m3u8\?a=[^'\"]+)['\"]",
+                        r"['\"]([^'\"]*live[^'\"]*\.m3u8\?a=[^'\"]+)['\"]",
+                        r"(live[^'\"]*\.m3u8\?a=[^\s&\"']+)",
+                    ]
 
-                        stream_path = None
-                        for pattern in patterns:
-                            if match := re.search(pattern, text, re.IGNORECASE):
-                                stream_path = match.group(1)
-                                break
+                    stream_path = None
+                    for pattern in patterns:
+                        if match := re.search(pattern, text, re.IGNORECASE):
+                            stream_path = match.group(1)
+                            break
 
-                        if not stream_path:
-                            return None
+                    if not stream_path:
+                        return None
 
-                        if "livee.m3u8" in stream_path:
-                            stream_path = stream_path.replace("livee.m3u8", "live.m3u8")
+                    if "livee.m3u8" in stream_path:
+                        stream_path = stream_path.replace("livee.m3u8", "live.m3u8")
 
-                        if self.entity_id:
-                            self.async_write_ha_state()
-                        return f"https://hd-auth.skylinewebcams.com/{stream_path}"
+                    if self.entity_id:
+                        self.async_write_ha_state()
+                    return f"https://hd-auth.skylinewebcams.com/{stream_path}"
 
         except (aiohttp.ClientError, asyncio.TimeoutError) as err:
             _LOGGER.error(

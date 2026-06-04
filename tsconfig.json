@@ -10,13 +10,13 @@
     "useDefineForClassFields": false,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "outDir": "../custom_components/skylinewebcams",
-    "rootDir": "src",
+    "outDir": "custom_components/skylinewebcams",
+    "rootDir": "frontend/src",
     "declaration": false,
     "sourceMap": true,
     "lib": ["ES2022", "DOM"],
     "types": []
   },
-  "include": ["src/**/*.ts", "src/declarations.d.ts"],
+  "include": ["frontend/src/**/*.ts", "frontend/test/**/*.ts", "frontend/src/declarations.d.ts"],
   "exclude": ["node_modules", "dist"]
 }

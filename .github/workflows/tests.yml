@@ -2,9 +2,9 @@ name: Tests
 
 on:
   push:
-    branches: ["main", "master"]
+    branches: ['main', 'master']
   pull_request:
-    branches: ["main", "master"]
+    branches: ['main', 'master']
 
 jobs:
   python-tests:
@@ -16,7 +16,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: '3.12'
 
       - name: Install dependencies
         run: |
@@ -25,18 +25,34 @@ jobs:
 
       - name: Run tests (offline)
         run: |
-          # Run the full test suite offline and capture result for summary
-          PYTHONPATH=. pytest custom_components/skylinewebcams/tests > pytest_output.txt 2>&1 || test_exit_code=$?
+          # Run tests offline without color codes and save output
+          PYTHONPATH=. pytest --color=no custom_components/skylinewebcams/tests > pytest_output.txt 2>&1 || test_exit_code=$?
           cat pytest_output.txt
-          echo "### Python Pytest Results" >> $GITHUB_STEP_SUMMARY
+
+          # Extract summary line (e.g. "5 passed in 0.20s")
+          SUMMARY_LINE=$(grep -E "passed|failed" pytest_output.txt | tail -n 1 || echo "Tests completed")
+
+          echo "### 🐍 Python Test Results" >> $GITHUB_STEP_SUMMARY
           if [ -z "$test_exit_code" ]; then
-            echo "✅ All Python tests passed successfully!" >> $GITHUB_STEP_SUMMARY
+            echo "> [!NOTE]" >> $GITHUB_STEP_SUMMARY
+            echo "> **Status**: ✅ All Python tests passed successfully!" >> $GITHUB_STEP_SUMMARY
+            echo ">" >> $GITHUB_STEP_SUMMARY
+            echo "> **Details**: \`$SUMMARY_LINE\`" >> $GITHUB_STEP_SUMMARY
           else
-            echo "❌ Python tests failed with exit code $test_exit_code" >> $GITHUB_STEP_SUMMARY
+            echo "> [!CAUTION]" >> $GITHUB_STEP_SUMMARY
+            echo "> **Status**: ❌ Python tests failed with exit code $test_exit_code" >> $GITHUB_STEP_SUMMARY
+            echo ">" >> $GITHUB_STEP_SUMMARY
+            echo "> **Details**: \`$SUMMARY_LINE\`" >> $GITHUB_STEP_SUMMARY
           fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "<details><summary>🔍 View Raw Pytest Output</summary>" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          tail -n 5 pytest_output.txt >> $GITHUB_STEP_SUMMARY
+          cat pytest_output.txt >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "</details>" >> $GITHUB_STEP_SUMMARY
+
           if [ -n "$test_exit_code" ]; then exit $test_exit_code; fi
 
   frontend-tests:
@@ -56,43 +72,66 @@ jobs:
 
       - name: Check formatting
         run: |
-          echo "### Formatting & Linting Checks" >> $GITHUB_STEP_SUMMARY
+          echo "### 🎨 Code Quality Checks" >> $GITHUB_STEP_SUMMARY
           if npm run check-format; then
-            echo "✅ Code formatting check passed (Prettier)" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ **Prettier**: Code formatting check passed" >> $GITHUB_STEP_SUMMARY
           else
-            echo "❌ Code formatting check failed (Prettier)" >> $GITHUB_STEP_SUMMARY
+            echo "- ❌ **Prettier**: Code formatting check failed" >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
 
       - name: Run linter
         run: |
           if npm run lint; then
-            echo "✅ Linter check passed (ESLint)" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ **ESLint**: Code linting check passed" >> $GITHUB_STEP_SUMMARY
           else
-            echo "❌ Linter check failed (ESLint)" >> $GITHUB_STEP_SUMMARY
+            echo "- ❌ **ESLint**: Code linting check failed" >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
 
       - name: Run unit tests
         run: |
-          npm test > vitest_output.txt 2>&1 || test_exit_code=$?
+          # Run tests with NO_COLOR=true to strip ANSI escapes
+          NO_COLOR=true npm test > vitest_output.txt 2>&1 || test_exit_code=$?
           cat vitest_output.txt
-          echo "### Frontend Unit Test Results" >> $GITHUB_STEP_SUMMARY
+
+          # Extract summary lines
+          TEST_FILES_SUMMARY=$(grep "Test Files" vitest_output.txt || echo "")
+          TESTS_SUMMARY=$(grep "Tests" vitest_output.txt || echo "")
+          DURATION_SUMMARY=$(grep "Duration" vitest_output.txt || echo "")
+
+          echo "### 🧪 Frontend Unit Test Results" >> $GITHUB_STEP_SUMMARY
           if [ -z "$test_exit_code" ]; then
-            echo "✅ All frontend unit tests passed successfully!" >> $GITHUB_STEP_SUMMARY
+            echo "> [!NOTE]" >> $GITHUB_STEP_SUMMARY
+            echo "> **Status**: ✅ All frontend unit tests passed successfully!" >> $GITHUB_STEP_SUMMARY
+            echo ">" >> $GITHUB_STEP_SUMMARY
+            echo "> - $TEST_FILES_SUMMARY" >> $GITHUB_STEP_SUMMARY
+            echo "> - $TESTS_SUMMARY" >> $GITHUB_STEP_SUMMARY
+            echo "> - $DURATION_SUMMARY" >> $GITHUB_STEP_SUMMARY
           else
-            echo "❌ Frontend unit tests failed!" >> $GITHUB_STEP_SUMMARY
+            echo "> [!CAUTION]" >> $GITHUB_STEP_SUMMARY
+            echo "> **Status**: ❌ Frontend unit tests failed!" >> $GITHUB_STEP_SUMMARY
+            echo ">" >> $GITHUB_STEP_SUMMARY
+            echo "> - $TEST_FILES_SUMMARY" >> $GITHUB_STEP_SUMMARY
+            echo "> - $TESTS_SUMMARY" >> $GITHUB_STEP_SUMMARY
+            echo "> - $DURATION_SUMMARY" >> $GITHUB_STEP_SUMMARY
           fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "<details><summary>🔍 View Raw Vitest Output</summary>" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          tail -n 8 vitest_output.txt >> $GITHUB_STEP_SUMMARY
+          cat vitest_output.txt >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "</details>" >> $GITHUB_STEP_SUMMARY
+
           if [ -n "$test_exit_code" ]; then exit $test_exit_code; fi
 
       - name: Build bundle
         run: |
           if npm run build; then
-            echo "✅ Lovelace card built successfully" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ **Rollup**: Lovelace card built successfully" >> $GITHUB_STEP_SUMMARY
           else
-            echo "❌ Lovelace card build failed" >> $GITHUB_STEP_SUMMARY
+            echo "- ❌ **Rollup**: Lovelace card build failed" >> $GITHUB_STEP_SUMMARY
             exit 1
           fi

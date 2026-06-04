@@ -8,5 +8,5 @@ services:
     environment:
       - TZ=Europe/Berlin
     ports:
-      - "8131:8123"
-    restart: "no"
+      - '8131:8123'
+    restart: 'no'

@@ -6,7 +6,7 @@ import nodeResolve from '@rollup/plugin-node-resolve';
 import json from '@rollup/plugin-json';
 import { compile } from 'sass';
 import litCss from 'rollup-plugin-lit-css';
-import pkg from '../package.json' with { type: 'json' };
+import pkg from './package.json' with { type: 'json' };
 
 const dev = process.env.ROLLUP_WATCH === 'true';
 
@@ -34,10 +34,10 @@ function logCardInfo() {
 }
 
 export default {
-  input: 'src/skyline-webcams-card.ts',
+  input: 'frontend/src/skyline-webcams-card.ts',
   context: 'window',
   output: {
-    file: '../' + pkg.main,
+    file: pkg.main,
     format: 'es',
     sourcemap: dev,
     banner: logCardInfo(),
@@ -57,6 +57,7 @@ export default {
     }),
     json({ compact: true }),
     typescript({
+      tsconfig: './tsconfig.json',
       sourceMap: dev,
       inlineSources: dev,
     }),

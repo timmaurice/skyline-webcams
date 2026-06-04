@@ -7,12 +7,12 @@ import prettierConfig from 'eslint-config-prettier';
 
 export default tseslint.config(
   {
-    ignores: ['../custom_components/**', 'node_modules/**'],
+    ignores: ['custom_components/**', 'node_modules/**', 'frontend/node_modules/**'],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    files: ['src/**/*.ts'],
+    files: ['frontend/src/**/*.ts', 'frontend/test/**/*.ts'],
     plugins: {
       lit: litPlugin,
       wc: wcPlugin,

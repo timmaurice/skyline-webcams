@@ -74,20 +74,20 @@ You can also configure cameras directly in your `configuration.yaml`:
 ```yaml
 camera:
   - platform: skylinewebcams
-    name: "Schwangau - Neuschwanstein Castle"
-    url: "https://www.skylinewebcams.com/en/webcam/deutschland/bayern/schwangau/schloss-neuschwanstein.html"
+    name: 'Schwangau - Neuschwanstein Castle'
+    url: 'https://www.skylinewebcams.com/en/webcam/deutschland/bayern/schwangau/schloss-neuschwanstein.html'
 
   - platform: skylinewebcams
-    name: "New York - Times Square"
-    url: "https://www.skylinewebcams.com/en/webcam/united-states/new-york/new-york/times-square.html"
+    name: 'New York - Times Square'
+    url: 'https://www.skylinewebcams.com/en/webcam/united-states/new-york/new-york/times-square.html'
 
   - platform: skylinewebcams
-    name: "Venice - St Mark Square"
-    url: "https://www.skylinewebcams.com/en/webcam/italia/veneto/venezia/piazza-san-marco.html"
+    name: 'Venice - St Mark Square'
+    url: 'https://www.skylinewebcams.com/en/webcam/italia/veneto/venezia/piazza-san-marco.html'
 
   - platform: skylinewebcams
-    name: "Rome - Pantheon"
-    url: "https://www.skylinewebcams.com/en/webcam/italia/lazio/roma/pantheon.html"
+    name: 'Rome - Pantheon'
+    url: 'https://www.skylinewebcams.com/en/webcam/italia/lazio/roma/pantheon.html'
 ```
 
 ## Created Sensors
@@ -114,13 +114,13 @@ This integration includes a dedicated custom Lovelace card: `custom:skyline-webc
 
 #### Card Configuration
 
-| Name           | Type   | Default      | Description                                                                 |
-| :------------- | :----- | :----------- | :-------------------------------------------------------------------------- |
-| `type`         | string | **Required** | `custom:skyline-webcams-card`                                               |
-| `entity`       | string | **Required** | The camera entity (e.g., `camera.live_cam_schwangau_neuschwanstein_castle`) |
-| `title`        | string | `(none)`     | Custom title for the card (falls back to entity friendly name if omitted)   |
-| `aspect_ratio` | string | `16/9`       | Aspect ratio of the video player container (e.g., `16/9`, `4/3`)            |
-| `show_link`    | boolean| `false`      | Show a direct link to the original webcam page on SkylineWebcams            |
+| Name           | Type    | Default      | Description                                                                 |
+| :------------- | :------ | :----------- | :-------------------------------------------------------------------------- |
+| `type`         | string  | **Required** | `custom:skyline-webcams-card`                                               |
+| `entity`       | string  | **Required** | The camera entity (e.g., `camera.live_cam_schwangau_neuschwanstein_castle`) |
+| `title`        | string  | `(none)`     | Custom title for the card (falls back to entity friendly name if omitted)   |
+| `aspect_ratio` | string  | `16/9`       | Aspect ratio of the video player container (e.g., `16/9`, `4/3`)            |
+| `show_link`    | boolean | `false`      | Show a direct link to the original webcam page on SkylineWebcams            |
 
 #### Example YAML
 

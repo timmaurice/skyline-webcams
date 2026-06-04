@@ -22,21 +22,21 @@ logger:
 
 camera:
   - platform: skylinewebcams
-    name: "Schwangau - Neuschwanstein Castle"
-    url: "https://www.skylinewebcams.com/en/webcam/deutschland/bayern/schwangau/schloss-neuschwanstein.html"
+    name: 'Schwangau - Neuschwanstein Castle'
+    url: 'https://www.skylinewebcams.com/en/webcam/deutschland/bayern/schwangau/schloss-neuschwanstein.html'
 
   - platform: skylinewebcams
-    name: "Kenya - Tsavo East National Park"
-    url: "https://www.skylinewebcams.com/en/webcam/kenya/taita-taveta-county/voi/tsavo-east-national-park.html"
+    name: 'Kenya - Tsavo East National Park'
+    url: 'https://www.skylinewebcams.com/en/webcam/kenya/taita-taveta-county/voi/tsavo-east-national-park.html'
 
   - platform: skylinewebcams
-    name: "Venice - St Mark Square"
-    url: "https://www.skylinewebcams.com/en/webcam/italia/veneto/venezia/piazza-san-marco.html"
+    name: 'Venice - St Mark Square'
+    url: 'https://www.skylinewebcams.com/en/webcam/italia/veneto/venezia/piazza-san-marco.html'
 
   - platform: skylinewebcams
-    name: "Rome - Pantheon"
-    url: "https://www.skylinewebcams.com/en/webcam/italia/lazio/roma/pantheon.html"
+    name: 'Rome - Pantheon'
+    url: 'https://www.skylinewebcams.com/en/webcam/italia/lazio/roma/pantheon.html'
 
   - platform: skylinewebcams
-    name: "Shanghai - Skyline"
-    url: "https://www.skylinewebcams.com/en/webcam/china/shanghai/shanghai/skyline-of-shanghai.html"
+    name: 'Shanghai - Skyline'
+    url: 'https://www.skylinewebcams.com/en/webcam/china/shanghai/shanghai/skyline-of-shanghai.html'

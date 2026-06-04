@@ -11,12 +11,12 @@
   "type": "module",
   "main": "custom_components/skylinewebcams/skyline-webcams-card.js",
   "scripts": {
-    "build": "cd frontend && rollup -c",
-    "watch": "cd frontend && rollup -c -w",
-    "format": "cd frontend && prettier . --write",
-    "check-format": "cd frontend && prettier --check .",
-    "lint": "cd frontend && eslint .",
-    "test": "cd frontend && NODE_ENV=production vitest run --reporter=verbose"
+    "build": "rollup -c",
+    "watch": "rollup -c -w",
+    "format": "prettier . --write && black .",
+    "check-format": "prettier --check .",
+    "lint": "eslint .",
+    "test": "NODE_ENV=production vitest run --reporter=verbose"
   },
   "devDependencies": {
     "@rollup/plugin-json": "^6.1.0",
