@@ -106,6 +106,12 @@ This integration includes a dedicated custom Lovelace card: `custom:skyline-webc
 
 <img src="https://raw.githubusercontent.com/timmaurice/skyline-webcams/main/image.png" alt="Card Screenshot" />
 
+#### Card Features
+
+- **Overlay Controls**: Interactive control bar (Play/Pause, Picture-in-Picture, Fullscreen) that fades in smoothly on hover.
+- **Viewport Pausing (IntersectionObserver)**: Automatically pauses playback and detaches Hls.js when the card is scrolled out of the viewport or the tab is hidden, optimizing network usage and CPU.
+- **Backend LRU Chunk Cache**: The backend proxy uses a thread-safe LRU caching mechanism for `.ts` video chunks, speeding up card startup and reducing upstream server requests when multiple views are active.
+
 #### Card Configuration
 
 | Name           | Type   | Default      | Description                                                                 |
@@ -114,6 +120,7 @@ This integration includes a dedicated custom Lovelace card: `custom:skyline-webc
 | `entity`       | string | **Required** | The camera entity (e.g., `camera.live_cam_schwangau_neuschwanstein_castle`) |
 | `title`        | string | `(none)`     | Custom title for the card (falls back to entity friendly name if omitted)   |
 | `aspect_ratio` | string | `16/9`       | Aspect ratio of the video player container (e.g., `16/9`, `4/3`)            |
+| `show_link`    | boolean| `false`      | Show a direct link to the original webcam page on SkylineWebcams            |
 
 #### Example YAML
 
@@ -121,10 +128,13 @@ This integration includes a dedicated custom Lovelace card: `custom:skyline-webc
 type: custom:skyline-webcams-card
 entity: camera.live_cam_schwangau_neuschwanstein_castle
 aspect_ratio: 16/9
+show_link: true
 ```
 
 <details>
 <summary>Alternative Generic Card configuration</summary>
+
+<img src="https://raw.githubusercontent.com/timmaurice/skyline-webcams/main/image-generic.png" alt="Card Screenshot Generic" />
 
 If you prefer not to use the custom card, you can combine Home Assistant's built-in `picture-entity` and `markdown` cards:
 
