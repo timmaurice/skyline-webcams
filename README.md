@@ -104,7 +104,7 @@ camera:
 
 This integration includes a dedicated custom Lovelace card: `custom:skyline-webcams-card`.
 
-<img src="https://raw.githubusercontent.com/timmaurice/skyline-webcams/main/image.png" alt="Card Screenshot" />
+<img src="https://raw.githubusercontent.com/timmaurice/skyline-webcams/main/image.png" alt="Card Screenshot" width="400" />
 
 #### Card Features
 
@@ -134,7 +134,7 @@ show_link: true
 <details>
 <summary>Alternative Generic Card configuration</summary>
 
-<img src="https://raw.githubusercontent.com/timmaurice/skyline-webcams/main/image-generic.png" alt="Card Screenshot Generic" />
+<img src="https://raw.githubusercontent.com/timmaurice/skyline-webcams/main/image-generic.png" alt="Card Screenshot Generic" width="400" />
 
 If you prefer not to use the custom card, you can combine Home Assistant's built-in `picture-entity` and `markdown` cards:
 
