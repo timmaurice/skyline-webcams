@@ -1,0 +1,19 @@
+{
+  "editor": {
+    "entity": "Camera Entity",
+    "title": "Title (Optional)",
+    "aspect_ratio": "Aspect Ratio (Default: 16/9)",
+    "show_link": "Show Website Link",
+    "show_video_controls": "Show Video Controls"
+  },
+  "card": {
+    "entity_not_found": "Entity not found: {entity}",
+    "retry": "Retry",
+    "play": "Play",
+    "pause": "Pause",
+    "picture_in_picture": "Picture-in-Picture",
+    "fullscreen": "Fullscreen",
+    "exit_fullscreen": "Exit Fullscreen",
+    "view_on_skylinewebcams": "View on SkylineWebcams"
+  }
+}

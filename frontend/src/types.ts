@@ -54,6 +54,7 @@ export interface SkylineWebcamsCardConfig extends LovelaceCardConfig {
   title?: string;
   aspect_ratio?: string;
   show_link?: boolean;
+  show_video_controls?: boolean;
 }
 
 declare global {

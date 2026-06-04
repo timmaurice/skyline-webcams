@@ -22,6 +22,17 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements_test.txt
+          pip install "black==25.9.0"
+
+      - name: Check formatting
+        run: |
+          echo "### 🎨 Python Code Quality" >> $GITHUB_STEP_SUMMARY
+          if black --check .; then
+            echo "- ✅ **Black**: Python code formatting passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ❌ **Black**: Python code formatting failed" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
 
       - name: Run tests (offline)
         run: |
@@ -74,9 +85,9 @@ jobs:
         run: |
           echo "### 🎨 Code Quality Checks" >> $GITHUB_STEP_SUMMARY
           if npm run check-format; then
-            echo "- ✅ **Prettier**: Code formatting check passed" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ **Prettier**: Code formatting checks passed" >> $GITHUB_STEP_SUMMARY
           else
-            echo "- ❌ **Prettier**: Code formatting check failed" >> $GITHUB_STEP_SUMMARY
+            echo "- ❌ **Prettier**: Code formatting checks failed" >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
 

@@ -1,0 +1,19 @@
+{
+  "editor": {
+    "entity": "Kamera-Entität",
+    "title": "Titel (Optional)",
+    "aspect_ratio": "Seitenverhältnis (Standard: 16/9)",
+    "show_link": "Webseiten-Link anzeigen",
+    "show_video_controls": "Videosteuerelemente anzeigen"
+  },
+  "card": {
+    "entity_not_found": "Entität nicht gefunden: {entity}",
+    "retry": "Wiederholen",
+    "play": "Abspielen",
+    "pause": "Pausieren",
+    "picture_in_picture": "Bild-in-Bild",
+    "fullscreen": "Vollbild",
+    "exit_fullscreen": "Vollbild beenden",
+    "view_on_skylinewebcams": "Auf SkylineWebcams ansehen"
+  }
+}

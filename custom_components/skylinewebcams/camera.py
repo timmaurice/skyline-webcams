@@ -324,9 +324,26 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
     async def async_camera_image(
         self, width: int | None = None, height: int | None = None
     ) -> bytes | None:
-        """Return a still image response directly using the page poster."""
+        """Return a still image response directly using the stream or fallback to page poster."""
         if "poster" not in self._additional_attributes:
             await self.get_fresh_stream_url()
+
+        url = await self.get_fresh_stream_url()
+        if url:
+            try:
+                image_bytes = await async_get_image(
+                    self.hass,
+                    url,
+                    extra_cmd=self.ffmpeg_arguments,
+                    width=width,
+                    height=height,
+                )
+                if image_bytes:
+                    return image_bytes
+            except Exception as err:
+                _LOGGER.error(
+                    "[%s] Failed to capture image from stream: %s", self._attr_name, err
+                )
 
         poster_url = self._additional_attributes.get("poster")
         if not poster_url:

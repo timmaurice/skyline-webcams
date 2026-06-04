@@ -1,13 +1,22 @@
 {
   "domain": "skylinewebcams",
   "name": "SkylineWebcams",
-  "after_dependencies": ["ffmpeg"],
-  "codeowners": ["@timmaurice"],
+  "after_dependencies": [
+    "ffmpeg"
+  ],
+  "codeowners": [
+    "@timmaurice"
+  ],
   "config_flow": true,
-  "dependencies": ["http", "stream"],
+  "dependencies": [
+    "http",
+    "stream"
+  ],
   "documentation": "https://github.com/timmaurice/skyline-webcams",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/timmaurice/skyline-webcams/issues",
-  "requirements": ["beautifulsoup4>=4.14.3"],
-  "version": "2.0.0"
+  "requirements": [
+    "beautifulsoup4>=4.14.3"
+  ],
+  "version": "2.1.0"
 }

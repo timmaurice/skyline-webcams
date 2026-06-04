@@ -2,6 +2,8 @@ import { LitElement, TemplateResult, html, unsafeCSS } from 'lit';
 import { property, state, query } from 'lit/decorators.js';
 import Hls from 'hls.js';
 import { HomeAssistant, LovelaceCard, LovelaceCardEditor, SkylineWebcamsCardConfig } from './types.js';
+import { localize } from './localize.js';
+import { isPiPSupported, togglePiP, toggleFullscreen, fireEvent } from './utils.js';
 import styles from './styles/card.styles.scss';
 import './skyline-webcams-card-editor.js';
 
@@ -16,6 +18,7 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
     return {
       entity: '',
       aspect_ratio: '16/9',
+      show_video_controls: true,
     };
   }
 
@@ -94,6 +97,30 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
       this._intersectionObserver = undefined;
     }
     this._destroyHls();
+  }
+  protected shouldUpdate(changedProps: import('lit').PropertyValues): boolean {
+    if (
+      changedProps.has('_config') ||
+      changedProps.has('_error') ||
+      changedProps.has('_loading') ||
+      changedProps.has('_streamUrl') ||
+      changedProps.has('_isIntersecting')
+    ) {
+      return true;
+    }
+
+    const oldHass = changedProps.get('hass') as HomeAssistant | undefined;
+    if (oldHass && this.hass && this._config?.entity) {
+      if (oldHass.states[this._config.entity] !== this.hass.states[this._config.entity]) {
+        return true;
+      }
+      if (oldHass.language !== this.hass.language) {
+        return true;
+      }
+      return false;
+    }
+
+    return true;
   }
 
   protected updated(changedProperties: Map<string | number | symbol, unknown>): void {
@@ -297,18 +324,8 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
 
   private _handleMoreInfo(): void {
     if (this._config?.entity) {
-      const event = new CustomEvent('hass-more-info', {
-        bubbles: true,
-        cancelable: false,
-        composed: true,
-        detail: { entityId: this._config.entity },
-      });
-      this.dispatchEvent(event);
+      fireEvent(this, 'hass-more-info', { entityId: this._config.entity });
     }
-  }
-
-  private _isPiPSupported(): boolean {
-    return typeof document !== 'undefined' && 'pictureInPictureEnabled' in document && document.pictureInPictureEnabled;
   }
 
   private _togglePlay(e: Event): void {
@@ -337,34 +354,13 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
 
   private async _togglePiP(e: Event): Promise<void> {
     e.stopPropagation();
-    const video = this._videoEl;
-    if (!video) return;
-
-    try {
-      if (document.pictureInPictureElement === video) {
-        await document.exitPictureInPicture();
-      } else {
-        await video.requestPictureInPicture();
-      }
-    } catch (err) {
-      console.error('skyline-webcams-card: failed to toggle PiP', err);
-    }
+    await togglePiP(this._videoEl);
   }
 
   private async _toggleFullscreen(e: Event): Promise<void> {
     e.stopPropagation();
     const container = this.shadowRoot?.querySelector('.video-container');
-    if (!container) return;
-
-    try {
-      if (document.fullscreenElement === container) {
-        await document.exitFullscreen();
-      } else {
-        await container.requestFullscreen();
-      }
-    } catch (err) {
-      console.error('skyline-webcams-card: failed to toggle Fullscreen', err);
-    }
+    await toggleFullscreen(container);
   }
 
   protected render(): TemplateResult | void {
@@ -374,14 +370,24 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
     const stateObj = this.hass.states[entityId];
 
     if (!stateObj) {
+      const errorTitle = this._config.title || localize(this.hass, 'card.default_title');
       return html`
-        <ha-card .header=${this._config.title || 'Skyline Webcam'}>
-          <div class="card-content error-container">Entity not found: ${entityId}</div>
+        <ha-card>
+          ${errorTitle
+            ? html`
+                <h1 class="card-header" @click=${this._handleMoreInfo} title="Open entity">
+                  <div class="name" dir="ltr">${errorTitle}</div>
+                </h1>
+              `
+            : ''}
+          <div class="card-content error-container">
+            ${localize(this.hass, 'card.entity_not_found', { entity: entityId })}
+          </div>
         </ha-card>
       `;
     }
 
-    const title = this._config.title || stateObj.attributes.friendly_name || 'Skyline Webcam';
+    const title = this._config.title || stateObj.attributes.friendly_name || localize(this.hass, 'card.default_title');
     const description = stateObj.attributes.description || '';
     const country = stateObj.attributes.country || '';
     const region = stateObj.attributes.region || '';
@@ -392,14 +398,21 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
     const locationText = locationParts.join(', ');
 
     return html`
-      <ha-card .header=${this._config.title ? title : ''} @click=${this._handleMoreInfo} style="cursor: pointer;">
+      <ha-card>
+        ${this._config.title
+          ? html`
+              <h1 class="card-header" @click=${this._handleMoreInfo} title="Open entity">
+                <div class="name" dir="ltr">${title}</div>
+              </h1>
+            `
+          : ''}
         <div class="card-content">
           <div class="video-container" style="aspect-ratio: ${this._config.aspect_ratio || '16/9'};">
             ${this._error
               ? html`
                   <div class="overlay error-overlay">
                     <p class="error-msg">${this._error}</p>
-                    <button class="retry-btn" @click=${this._handleRetry}>Retry</button>
+                    <button class="retry-btn" @click=${this._handleRetry}>${localize(this.hass, 'card.retry')}</button>
                   </div>
                 `
               : ''}
@@ -421,41 +434,57 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
               @pause=${() => this.requestUpdate()}
             ></video>
 
-            <div class="video-controls" @click=${(e: Event) => e.stopPropagation()}>
-              <button
-                class="control-btn"
-                @click=${this._togglePlay}
-                aria-label="${this._videoEl?.paused ? 'Play' : 'Pause'}"
-                title="${this._videoEl?.paused ? 'Play' : 'Pause'}"
-              >
-                <ha-icon icon="${this._videoEl?.paused ? 'mdi:play' : 'mdi:pause'}"></ha-icon>
-              </button>
-              <div class="spacer"></div>
-              ${this._isPiPSupported()
-                ? html`
+            ${this._config.show_video_controls !== false
+              ? html`
+                  <div class="video-controls" @click=${(e: Event) => e.stopPropagation()}>
                     <button
                       class="control-btn"
-                      @click=${this._togglePiP}
-                      aria-label="Picture-in-Picture"
-                      title="Picture-in-Picture"
+                      @click=${this._togglePlay}
+                      aria-label="${this._videoEl?.paused
+                        ? localize(this.hass, 'card.play')
+                        : localize(this.hass, 'card.pause')}"
+                      title="${this._videoEl?.paused
+                        ? localize(this.hass, 'card.play')
+                        : localize(this.hass, 'card.pause')}"
                     >
-                      <ha-icon icon="mdi:picture-in-picture-bottom-right"></ha-icon>
+                      <ha-icon icon="${this._videoEl?.paused ? 'mdi:play' : 'mdi:pause'}"></ha-icon>
                     </button>
-                  `
-                : ''}
-              <button
-                class="control-btn"
-                @click=${this._toggleFullscreen}
-                aria-label="${document.fullscreenElement ? 'Exit Fullscreen' : 'Fullscreen'}"
-                title="${document.fullscreenElement ? 'Exit Fullscreen' : 'Fullscreen'}"
-              >
-                <ha-icon icon="${document.fullscreenElement ? 'mdi:fullscreen-exit' : 'mdi:fullscreen'}"></ha-icon>
-              </button>
-            </div>
+                    <div class="spacer"></div>
+                    ${isPiPSupported()
+                      ? html`
+                          <button
+                            class="control-btn"
+                            @click=${this._togglePiP}
+                            aria-label="${localize(this.hass, 'card.picture_in_picture')}"
+                            title="${localize(this.hass, 'card.picture_in_picture')}"
+                          >
+                            <ha-icon icon="mdi:picture-in-picture-bottom-right"></ha-icon>
+                          </button>
+                        `
+                      : ''}
+                    <button
+                      class="control-btn"
+                      @click=${this._toggleFullscreen}
+                      aria-label="${document.fullscreenElement
+                        ? localize(this.hass, 'card.exit_fullscreen')
+                        : localize(this.hass, 'card.fullscreen')}"
+                      title="${document.fullscreenElement
+                        ? localize(this.hass, 'card.exit_fullscreen')
+                        : localize(this.hass, 'card.fullscreen')}"
+                    >
+                      <ha-icon
+                        icon="${document.fullscreenElement ? 'mdi:fullscreen-exit' : 'mdi:fullscreen'}"
+                      ></ha-icon>
+                    </button>
+                  </div>
+                `
+              : ''}
           </div>
 
           <div class="webcam-info">
-            ${!this._config.title && title ? html`<h2 class="webcam-title">${title}</h2>` : ''}
+            ${!this._config.title && title
+              ? html`<h2 class="webcam-title" @click=${this._handleMoreInfo} title="Open entity">${title}</h2>`
+              : ''}
             ${locationText
               ? html`<p class="webcam-location"><ha-icon icon="mdi:map-marker"></ha-icon> ${locationText}</p>`
               : ''}
@@ -469,7 +498,7 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
                     class="webcam-source-link"
                     @click=${(e: Event) => e.stopPropagation()}
                   >
-                    <ha-icon icon="mdi:open-in-new"></ha-icon> View on SkylineWebcams
+                    <ha-icon icon="mdi:open-in-new"></ha-icon> ${localize(this.hass, 'card.view_on_skylinewebcams')}
                   </a>
                 `
               : ''}

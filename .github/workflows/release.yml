@@ -43,6 +43,7 @@ jobs:
       - name: Build frontend card
         run: |
           npm ci
+          npx prettier --write package.json custom_components/skylinewebcams/manifest.json
           npm run build
 
       # 6. Commit and push updated files to main

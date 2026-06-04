@@ -114,13 +114,14 @@ This integration includes a dedicated custom Lovelace card: `custom:skyline-webc
 
 #### Card Configuration
 
-| Name           | Type    | Default      | Description                                                                 |
-| :------------- | :------ | :----------- | :-------------------------------------------------------------------------- |
-| `type`         | string  | **Required** | `custom:skyline-webcams-card`                                               |
-| `entity`       | string  | **Required** | The camera entity (e.g., `camera.live_cam_schwangau_neuschwanstein_castle`) |
-| `title`        | string  | `(none)`     | Custom title for the card (falls back to entity friendly name if omitted)   |
-| `aspect_ratio` | string  | `16/9`       | Aspect ratio of the video player container (e.g., `16/9`, `4/3`)            |
-| `show_link`    | boolean | `false`      | Show a direct link to the original webcam page on SkylineWebcams            |
+| Name                  | Type    | Default      | Description                                                                  |
+| :-------------------- | :------ | :----------- | :--------------------------------------------------------------------------- |
+| `type`                | string  | **Required** | `custom:skyline-webcams-card`                                                |
+| `entity`              | string  | **Required** | The camera entity (e.g., `camera.live_cam_schwangau_neuschwanstein_castle`)  |
+| `title`               | string  | `(none)`     | Custom title for the card (falls back to entity friendly name if omitted)    |
+| `aspect_ratio`        | string  | `16/9`       | Aspect ratio of the video player container (e.g., `16/9`, `4/3`)             |
+| `show_link`           | boolean | `false`      | Show a direct link to the original webcam page on SkylineWebcams             |
+| `show_video_controls` | boolean | `true`       | Show the video overlay controls (Play/Pause, Picture-in-Picture, Fullscreen) |
 
 #### Example YAML
 
