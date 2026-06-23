@@ -12,7 +12,7 @@ jobs:
       contents: write
     steps:
       # 1. Checkout main branch directly
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           ref: main
