@@ -176,8 +176,6 @@ This integration is not affiliated with or endorsed by SkylineWebcams. It is a c
 
 For further assistance or to [report issues](https://github.com/timmaurice/skyline-webcams/issues), please visit the [GitHub repository](https://github.com/timmaurice/skyline-webcams).
 
-![Star History Chart](https://api.star-history.com/svg?repos=timmaurice/skyline-webcams&type=Date)
-
 ## ☕ Support My Work
 
 [<img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" height="30" />](https://www.buymeacoffee.com/timmaurice)
