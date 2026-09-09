@@ -164,6 +164,17 @@ content: >-
 text_only: true
 ```
 
+> [!WARNING]
+> **Known issue:** with `camera_view: live` the picture-entity card plays the
+> stream on a fresh page load, but it stays on a still frame after you leave the
+> dashboard view and come back to it. Only reloading the page brings the stream
+> back. The playback lives in Home Assistant's own card, so this is not
+> something the integration can influence.
+>
+> The custom card above does not have this problem: it notices when it returns
+> to a visible view and starts the stream again on its own. If you switch
+> between dashboard views, use `custom:skyline-webcams-card`.
+
 </details>
 
 ## Contributions
