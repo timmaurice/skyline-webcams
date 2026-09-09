@@ -9,6 +9,10 @@ import './skyline-webcams-card-editor.js';
 
 const ELEMENT_NAME = 'skyline-webcams-card';
 
+// Retry backoff, so a stream that keeps failing does not hammer the proxy.
+const RESTART_BASE_DELAY_MS = 1000;
+const RESTART_MAX_DELAY_MS = 30000;
+
 export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
   public static async getConfigElement(): Promise<LovelaceCardEditor> {
     return document.createElement('skyline-webcams-card-editor') as LovelaceCardEditor;
@@ -32,6 +36,8 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
   @query('video') private _videoEl?: HTMLVideoElement;
 
   private _hls?: Hls;
+  private _restartTimer?: number;
+  private _restartAttempts = 0;
   private _visibilityListener?: () => void;
   private _fullscreenListener?: () => void;
   private _intersectionObserver?: IntersectionObserver;
@@ -96,6 +102,12 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
       this._intersectionObserver.disconnect();
       this._intersectionObserver = undefined;
     }
+    // Home Assistant takes the card out of the DOM when the view changes and
+    // puts it back when the view returns. The observer then reports the very
+    // same value it had before, which is no change and therefore no trigger,
+    // and the card would stay on its poster for good. Forget the old value so
+    // coming back on screen counts as a change again.
+    this._isIntersecting = false;
     this._destroyHls();
   }
   protected shouldUpdate(changedProps: import('lit').PropertyValues): boolean {
@@ -152,6 +164,11 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
   private _streamSessionId = 0;
 
   private _destroyHls(): void {
+    // Invalidate a start that is still in flight, so it cannot attach a player
+    // to a card that was torn down in the meantime.
+    this._streamSessionId++;
+    this._clearRestartTimer();
+
     if (this._hls) {
       console.debug('skyline-webcams-card: destroying hls instance');
       this._hls.stopLoad();
@@ -160,20 +177,25 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
       this._hls = undefined;
     }
     if (this._videoEl) {
+      this._videoEl.onerror = null;
       this._videoEl.pause();
       this._videoEl.removeAttribute('src');
       this._videoEl.load();
     }
+    // Without this a teardown during startup would leave the card marked as
+    // loading, and _updatePlaybackState would never start it again.
+    this._loading = false;
     this._streamUrl = undefined;
   }
 
   private async _startStream(): Promise<void> {
     if (!this.hass || !this._config?.entity) return;
 
-    this._streamSessionId++;
-    const sessionId = this._streamSessionId;
-
+    // Tear down first: _destroyHls bumps the session id, so the id taken
+    // afterwards is the only one allowed to attach a player.
     this._destroyHls();
+    const sessionId = ++this._streamSessionId;
+
     this._loading = true;
     this._error = undefined;
     this.requestUpdate();
@@ -249,6 +271,7 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         console.debug('skyline-webcams-card: manifest parsed, playing video');
+        this._restartAttempts = 0;
         const playPromise = video.play();
         if (playPromise !== undefined) {
           playPromise.catch((err) => {
@@ -276,7 +299,7 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
             case Hls.ErrorTypes.NETWORK_ERROR:
               console.debug('skyline-webcams-card: fatal network error, attempting to recover');
               // Try to start a fresh stream from HA since the stream worker might have crashed/expired
-              this._startStream();
+              this._scheduleRestart();
               break;
             case Hls.ErrorTypes.MEDIA_ERROR:
               console.debug('skyline-webcams-card: fatal media error, attempting recovery');
@@ -284,7 +307,7 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
               break;
             default:
               console.error('skyline-webcams-card: unrecoverable fatal Hls error, restarting stream');
-              this._startStream();
+              this._scheduleRestart();
               break;
           }
         }
@@ -309,7 +332,7 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
 
       video.onerror = () => {
         console.warn('skyline-webcams-card: native video error, reloading stream');
-        this._startStream();
+        this._scheduleRestart();
       };
     } else {
       this._error = 'HLS streaming is not supported by your browser.';
@@ -317,7 +340,33 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
     }
   }
 
+  /**
+   * Retries the stream after a growing delay.
+   *
+   * A stream that keeps failing used to be retried without any pause, which
+   * hammered the proxy and, through it, skylinewebcams.com.
+   */
+  private _scheduleRestart(): void {
+    if (this._restartTimer !== undefined) return;
+
+    const delay = Math.min(RESTART_BASE_DELAY_MS * 2 ** this._restartAttempts, RESTART_MAX_DELAY_MS);
+    this._restartAttempts++;
+
+    this._restartTimer = window.setTimeout(() => {
+      this._restartTimer = undefined;
+      this._startStream();
+    }, delay);
+  }
+
+  private _clearRestartTimer(): void {
+    if (this._restartTimer !== undefined) {
+      clearTimeout(this._restartTimer);
+      this._restartTimer = undefined;
+    }
+  }
+
   private _handleRetry(): void {
+    this._restartAttempts = 0;
     this._error = undefined;
     this._startStream();
   }
