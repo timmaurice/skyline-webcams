@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import logging
 import asyncio
+import hmac
 import re
+import secrets
+from hashlib import sha256
+from urllib.parse import urlparse
 import aiohttp
 from bs4 import BeautifulSoup
 from aiohttp import web
@@ -27,6 +31,28 @@ import voluptuous as vol
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
+
+ALLOWED_STREAM_HOST = "skylinewebcams.com"
+
+
+def is_allowed_stream_url(url: str | None) -> bool:
+    """Check that a URL points at SkylineWebcams over HTTP(S).
+
+    The proxy fetches this URL from inside the Home Assistant network, so
+    anything that is not the upstream site must be rejected before a request
+    is made.
+    """
+    if not url:
+        return False
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False
+    if parsed.scheme not in ("http", "https"):
+        return False
+    host = (parsed.hostname or "").lower()
+    return host == ALLOWED_STREAM_HOST or host.endswith("." + ALLOWED_STREAM_HOST)
+
 
 PLATFORM_SCHEMA = cv.PLATFORM_SCHEMA.extend(
     {
@@ -103,12 +129,27 @@ class SkylineWebcamsHlsProxyView(HomeAssistantView):
         if not camera:
             return web.Response(status=404, text="Camera not found")
 
-        target_url = request.query.get("url")
+        # Segment requests carry a token that this proxy issued when it
+        # rewrote the playlist. A caller supplied URL is never fetched, so the
+        # endpoint cannot be used to reach arbitrary hosts.
+        segment_token = request.query.get("seg")
 
-        if not target_url:
+        if segment_token:
+            target_url = camera.resolve_segment_url(segment_token)
+            if not target_url:
+                return web.Response(status=404, text="Unknown stream segment")
+        else:
             target_url = await camera.get_fresh_stream_url()
             if not target_url:
                 return web.Response(status=502, text="Failed to fetch stream URL")
+
+        if not is_allowed_stream_url(target_url):
+            _LOGGER.warning(
+                "[%s] Refusing to proxy a URL outside %s",
+                camera.name,
+                ALLOWED_STREAM_HOST,
+            )
+            return web.Response(status=403, text="Stream host not allowed")
 
         is_ts_request = request.path.endswith(".ts") or (
             target_url and ".ts" in target_url
@@ -123,8 +164,8 @@ class SkylineWebcamsHlsProxyView(HomeAssistantView):
                 )
                 return web.Response(
                     body=body_bytes,
-                    content_type=content_type,
                     headers={
+                        "Content-Type": content_type,
                         "Access-Control-Allow-Origin": "*",
                         "Cache-Control": "public, max-age=3600",
                     },
@@ -157,6 +198,15 @@ class SkylineWebcamsHlsProxyView(HomeAssistantView):
                             return web.Response(
                                 status=502, text="Failed to fetch fresh stream URL"
                             )
+                        if not is_allowed_stream_url(target_url):
+                            _LOGGER.warning(
+                                "[%s] Refusing to proxy a URL outside %s",
+                                camera.name,
+                                ALLOWED_STREAM_HOST,
+                            )
+                            return web.Response(
+                                status=403, text="Stream host not allowed"
+                            )
 
                         # Retry fetch
                         async with session.get(
@@ -169,7 +219,7 @@ class SkylineWebcamsHlsProxyView(HomeAssistantView):
                                 )
                             text = await retry_resp.text()
                     rewritten_lines = []
-                    from urllib.parse import urljoin, quote, urlparse
+                    from urllib.parse import urljoin
 
                     parsed_target = urlparse(target_url)
                     for line in text.splitlines():
@@ -179,9 +229,26 @@ class SkylineWebcamsHlsProxyView(HomeAssistantView):
                             parsed_chunk = urlparse(chunk_url)
                             if not parsed_chunk.query and parsed_target.query:
                                 chunk_url = f"{chunk_url}?{parsed_target.query}"
-                            encoded_url = quote(chunk_url, safe="")
+                            if not is_allowed_stream_url(chunk_url):
+                                _LOGGER.warning(
+                                    "[%s] Dropping playlist entry outside %s",
+                                    camera.name,
+                                    ALLOWED_STREAM_HOST,
+                                )
+                                # Drop the tags that belong to the segment too,
+                                # so no dangling #EXTINF is left behind.
+                                while rewritten_lines and (
+                                    not rewritten_lines[-1]
+                                    or rewritten_lines[-1].startswith("#EXTINF")
+                                    or rewritten_lines[-1].startswith(
+                                        "#EXT-X-BYTERANGE"
+                                    )
+                                ):
+                                    rewritten_lines.pop()
+                                continue
+                            token = camera.register_segment_url(chunk_url)
                             rewritten_lines.append(
-                                f"/api/skylinewebcams_proxy/{entry_id}.ts?url={encoded_url}"
+                                f"/api/skylinewebcams_proxy/{entry_id}.ts?seg={token}"
                             )
                         else:
                             rewritten_lines.append(line)
@@ -197,8 +264,8 @@ class SkylineWebcamsHlsProxyView(HomeAssistantView):
                         camera.put_cached_ts(target_url, content_type, body_bytes)
                         return web.Response(
                             body=body_bytes,
-                            content_type=content_type,
                             headers={
+                                "Content-Type": content_type,
                                 "Access-Control-Allow-Origin": "*",
                                 "Cache-Control": "public, max-age=3600",
                             },
@@ -223,8 +290,9 @@ class SkylineWebcamsHlsProxyView(HomeAssistantView):
 
                     await response.write_eof()
                     return response
-        except Exception as e:
-            return web.Response(status=500, text=str(e))
+        except Exception:
+            _LOGGER.exception("[%s] Error while proxying the stream", camera.name)
+            return web.Response(status=502, text="Proxy error")
 
 
 class SkylineWebcamsCamera(Camera, RestoreEntity):
@@ -256,11 +324,39 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
         self._session = None
         self._ts_cache = OrderedDict()
         self._ts_cache_capacity = 15
+        # Segment URLs the proxy itself handed out, keyed by an opaque token.
+        # The proxy never fetches a URL that is not in here.
+        self._segment_urls: OrderedDict[str, str] = OrderedDict()
+        self._segment_capacity = 256
+        self._segment_secret = secrets.token_bytes(32)
 
     def get_session(self):
         if not self._session:
             self._session = async_create_clientsession(self.hass)
         return self._session
+
+    def register_segment_url(self, url: str) -> str:
+        """Register an upstream segment URL and return the token for it.
+
+        The token is derived from the URL with a per-camera secret, so the same
+        segment keeps the same token across playlist refreshes and the table
+        does not grow on every reload.
+        """
+        token = hmac.new(self._segment_secret, url.encode(), sha256).hexdigest()[:32]
+        if token in self._segment_urls:
+            self._segment_urls.move_to_end(token)
+        else:
+            self._segment_urls[token] = url
+            if len(self._segment_urls) > self._segment_capacity:
+                self._segment_urls.popitem(last=False)
+        return token
+
+    def resolve_segment_url(self, token: str) -> str | None:
+        """Return the upstream URL for a token the proxy issued earlier."""
+        url = self._segment_urls.get(token)
+        if url is not None:
+            self._segment_urls.move_to_end(token)
+        return url
 
     def get_cached_ts(self, url: str) -> tuple[str, bytes] | None:
         """Get cached TS chunk."""
