@@ -47,10 +47,10 @@ const dt={attribute:!0,type:String,converter:T,reflect:!1,hasChanged:S},ct=(t=dt
     `}static get styles(){return o``}}t([ut({attribute:!1})],Fc.prototype,"hass",void 0),t([ft()],Fc.prototype,"_config",void 0),customElements.get(Oc)||customElements.define(Oc,Fc);const $c="skyline-webcams-card";class Nc extends lt{constructor(){super(...arguments),this._loading=!1,this._isIntersecting=!1,this._restartAttempts=0,this._streamSessionId=0}static async getConfigElement(){return document.createElement("skyline-webcams-card-editor")}static getStubConfig(){return{entity:"",aspect_ratio:"16/9",show_video_controls:!0}}setConfig(t){if(!t||!t.entity)throw new Error("Please define a camera entity.");this._config=t}getCardSize(){return 4}connectedCallback(){super.connectedCallback(),"undefined"!=typeof IntersectionObserver?(this._intersectionObserver=new IntersectionObserver(t=>{const e=t[0].isIntersecting;this._isIntersecting!==e&&(this._isIntersecting=e,this._updatePlaybackState())},{threshold:.1}),this._intersectionObserver.observe(this)):(this._isIntersecting=!0,this._updatePlaybackState()),this._visibilityListener=()=>{this._updatePlaybackState()},document.addEventListener("visibilitychange",this._visibilityListener),this._fullscreenListener=()=>{this.requestUpdate()},document.addEventListener("fullscreenchange",this._fullscreenListener)}disconnectedCallback(){super.disconnectedCallback(),this._visibilityListener&&(document.removeEventListener("visibilitychange",this._visibilityListener),this._visibilityListener=void 0),this._fullscreenListener&&(document.removeEventListener("fullscreenchange",this._fullscreenListener),this._fullscreenListener=void 0),this._intersectionObserver&&(this._intersectionObserver.disconnect(),this._intersectionObserver=void 0),this._isIntersecting=!1,this._destroyHls()}shouldUpdate(t){if(t.has("_config")||t.has("_error")||t.has("_loading")||t.has("_streamUrl")||t.has("_isIntersecting"))return!0;const e=t.get("hass");return!(e&&this.hass&&this._config?.entity)||(e.states[this._config.entity]!==this.hass.states[this._config.entity]||e.language!==this.hass.language)}updated(t){if(super.updated(t),t.has("_config")){const e=t.get("_config");e?.entity!==this._config?.entity&&this._updatePlaybackState()}}_updatePlaybackState(){"visible"===document.visibilityState&&this._isIntersecting?this._hls||this._loading||this._error||!this.hass||!this._config?.entity||(console.debug("skyline-webcams-card: active and in viewport, starting stream"),this._startStream()):(this._hls||this._loading)&&(console.debug("skyline-webcams-card: hidden or out of viewport, stopping stream"),this._destroyHls())}_destroyHls(){this._streamSessionId++,this._clearRestartTimer(),this._hls&&(console.debug("skyline-webcams-card: destroying hls instance"),this._hls.stopLoad(),this._hls.detachMedia(),this._hls.destroy(),this._hls=void 0),this._videoEl&&(this._videoEl.onerror=null,this._videoEl.pause(),this._videoEl.removeAttribute("src"),this._videoEl.load()),this._loading=!1,this._streamUrl=void 0}async _startStream(){if(!this.hass||!this._config?.entity)return;this._destroyHls();const t=++this._streamSessionId;this._loading=!0,this._error=void 0,this.requestUpdate();try{console.debug(`skyline-webcams-card: resolving direct stream for ${this._config.entity}`);const e=this.hass.states[this._config.entity];if(!e)throw new Error(`Entity not found: ${this._config.entity}`);const s=e.attributes.entry_id;if(s)this._streamUrl=`/api/skylinewebcams_proxy/${s}.m3u8?t=${Date.now()}`;else{console.warn("skyline-webcams-card: entry_id not found, falling back to camera/stream");const t=await this.hass.callWS({type:"camera/stream",entity_id:this._config.entity});if(!t||!t.url)throw new Error("No stream URL returned from Home Assistant.");this._streamUrl=t.url}if(this._streamSessionId!==t)return;if(!this._streamUrl)throw new Error("No stream URL returned.");if(this._loading=!1,this.requestUpdate(),await this.updateComplete,this._streamSessionId!==t)return;this._initHls()}catch(e){if(this._streamSessionId!==t)return;console.error("skyline-webcams-card: failed to start stream",e),this._error=e?.message||"Failed to start stream.",this._loading=!1,this.requestUpdate()}}_initHls(){const t=this._videoEl,e=this._streamUrl;if(t&&e)if(Dc.isSupported()){console.debug("skyline-webcams-card: initializing Hls.js");const s=new Dc({maxBufferLength:30,maxMaxBufferLength:60,enableWorker:!0});this._hls=s,s.loadSource(e),s.attachMedia(t),s.on(Dc.Events.MANIFEST_PARSED,()=>{console.debug("skyline-webcams-card: manifest parsed, playing video"),this._restartAttempts=0;const e=t.play();void 0!==e&&e.catch(e=>{if("AbortError"===e.name)return;t.muted=!0;const s=t.play();void 0!==s&&s.catch(t=>{"AbortError"!==t.name&&console.error("skyline-webcams-card: failed to play even after muting",t)})})}),s.on(Dc.Events.ERROR,(t,e)=>{if((e.type!==Dc.ErrorTypes.MEDIA_ERROR||"bufferStalledError"!==e.details)&&(console.warn(`skyline-webcams-card: Hls error: ${e.type} - ${e.details}`,e),e.fatal))switch(e.type){case Dc.ErrorTypes.NETWORK_ERROR:console.debug("skyline-webcams-card: fatal network error, attempting to recover"),this._scheduleRestart();break;case Dc.ErrorTypes.MEDIA_ERROR:console.debug("skyline-webcams-card: fatal media error, attempting recovery"),s.recoverMediaError();break;default:console.error("skyline-webcams-card: unrecoverable fatal Hls error, restarting stream"),this._scheduleRestart()}})}else t.canPlayType("application/vnd.apple.mpegurl")?(console.debug("skyline-webcams-card: using native HLS support"),t.src=e,t.addEventListener("loadedmetadata",()=>{const e=t.play();void 0!==e&&e.catch(e=>{console.warn("skyline-webcams-card: native autoplay prevented, video muted",e),t.muted=!0;const s=t.play();void 0!==s&&s.catch(t=>console.error("skyline-webcams-card: native play failed",t))})}),t.onerror=()=>{console.warn("skyline-webcams-card: native video error, reloading stream"),this._scheduleRestart()}):(this._error="HLS streaming is not supported by your browser.",this.requestUpdate());else console.warn("skyline-webcams-card: video element or stream URL missing, cannot initialize Hls")}_scheduleRestart(){if(void 0!==this._restartTimer)return;const t=Math.min(1e3*2**this._restartAttempts,3e4);this._restartAttempts++,this._restartTimer=window.setTimeout(()=>{this._restartTimer=void 0,this._startStream()},t)}_clearRestartTimer(){void 0!==this._restartTimer&&(clearTimeout(this._restartTimer),this._restartTimer=void 0)}_handleRetry(){this._restartAttempts=0,this._error=void 0,this._startStream()}_handleMoreInfo(){this._config?.entity&&((t,e,s)=>{const i=new CustomEvent(e,{bubbles:!0,cancelable:!1,composed:!0,detail:s||{}});t.dispatchEvent(i)})(this,"hass-more-info",{entityId:this._config.entity})}_togglePlay(t){t.stopPropagation();const e=this._videoEl;if(e)if(e.paused){this._hls&&this._hls.startLoad();const t=e.play();void 0!==t&&t.catch(t=>{"AbortError"!==t.name&&console.error("skyline-webcams-card: failed to play video",t)})}else e.pause(),this._hls&&this._hls.stopLoad()}async _togglePiP(t){t.stopPropagation(),await(async t=>{if(t)try{document.pictureInPictureElement===t?await document.exitPictureInPicture():await t.requestPictureInPicture()}catch(t){console.error("skyline-webcams-card: failed to toggle PiP",t)}})(this._videoEl)}async _toggleFullscreen(t){t.stopPropagation();const e=this.shadowRoot?.querySelector(".video-container");await(async t=>{if(t)try{document.fullscreenElement===t?await document.exitFullscreen():await t.requestFullscreen()}catch(t){console.error("skyline-webcams-card: failed to toggle Fullscreen",t)}})(e)}render(){if(!this.hass||!this._config)return V``;const t=this._config.entity,e=this.hass.states[t];if(!e){const e=this._config.title||Cc(this.hass,"card.default_title");return V`
         <ha-card>
           ${e?V`
-                <h1 class="card-header" @click=${this._handleMoreInfo} title="Open entity">
-                  <div class="name" dir="ltr">${e}</div>
-                </h1>
-              `:""}
+                  <h1 class="card-header" @click=${this._handleMoreInfo} title="Open entity">
+                    <div class="name" dir="ltr">${e}</div>
+                  </h1>
+                `:""}
           <div class="card-content error-container">
             ${Cc(this.hass,"card.entity_not_found",{entity:t})}
           </div>
@@ -58,23 +58,25 @@ const dt={attribute:!0,type:String,converter:T,reflect:!1,hasChanged:S},ct=(t=dt
       `}const s=this._config.title||e.attributes.friendly_name||Cc(this.hass,"card.default_title"),i=e.attributes.description||"",r=e.attributes.country||"",n=e.attributes.region||"",a=[e.attributes.place||"",n,r].filter(t=>!!t),o=a.join(", ");return V`
       <ha-card>
         ${this._config.title?V`
-              <h1 class="card-header" @click=${this._handleMoreInfo} title="Open entity">
-                <div class="name" dir="ltr">${s}</div>
-              </h1>
-            `:""}
+                <h1 class="card-header" @click=${this._handleMoreInfo} title="Open entity">
+                  <div class="name" dir="ltr">${s}</div>
+                </h1>
+              `:""}
         <div class="card-content">
           <div class="video-container" style="aspect-ratio: ${this._config.aspect_ratio||"16/9"};">
             ${this._error?V`
-                  <div class="overlay error-overlay">
-                    <p class="error-msg">${this._error}</p>
-                    <button class="retry-btn" @click=${this._handleRetry}>${Cc(this.hass,"card.retry")}</button>
-                  </div>
-                `:""}
+                    <div class="overlay error-overlay">
+                      <p class="error-msg">${this._error}</p>
+                      <button class="retry-btn" @click=${this._handleRetry}>
+                        ${Cc(this.hass,"card.retry")}
+                      </button>
+                    </div>
+                  `:""}
             ${this._loading?V`
-                  <div class="overlay loading-overlay">
-                    <div class="spinner"></div>
-                  </div>
-                `:""}
+                    <div class="overlay loading-overlay">
+                      <div class="spinner"></div>
+                    </div>
+                  `:""}
 
             <video
               playsinline
@@ -87,38 +89,38 @@ const dt={attribute:!0,type:String,converter:T,reflect:!1,hasChanged:S},ct=(t=dt
             ></video>
 
             ${!1!==this._config.show_video_controls?V`
-                  <div class="video-controls" @click=${t=>t.stopPropagation()}>
-                    <button
-                      class="control-btn"
-                      @click=${this._togglePlay}
-                      aria-label="${this._videoEl?.paused?Cc(this.hass,"card.play"):Cc(this.hass,"card.pause")}"
-                      title="${this._videoEl?.paused?Cc(this.hass,"card.play"):Cc(this.hass,"card.pause")}"
-                    >
-                      <ha-icon icon="${this._videoEl?.paused?"mdi:play":"mdi:pause"}"></ha-icon>
-                    </button>
-                    <div class="spacer"></div>
-                    ${"undefined"!=typeof document&&"pictureInPictureEnabled"in document&&document.pictureInPictureEnabled?V`
-                          <button
-                            class="control-btn"
-                            @click=${this._togglePiP}
-                            aria-label="${Cc(this.hass,"card.picture_in_picture")}"
-                            title="${Cc(this.hass,"card.picture_in_picture")}"
-                          >
-                            <ha-icon icon="mdi:picture-in-picture-bottom-right"></ha-icon>
-                          </button>
-                        `:""}
-                    <button
-                      class="control-btn"
-                      @click=${this._toggleFullscreen}
-                      aria-label="${document.fullscreenElement?Cc(this.hass,"card.exit_fullscreen"):Cc(this.hass,"card.fullscreen")}"
-                      title="${document.fullscreenElement?Cc(this.hass,"card.exit_fullscreen"):Cc(this.hass,"card.fullscreen")}"
-                    >
-                      <ha-icon
-                        icon="${document.fullscreenElement?"mdi:fullscreen-exit":"mdi:fullscreen"}"
-                      ></ha-icon>
-                    </button>
-                  </div>
-                `:""}
+                    <div class="video-controls" @click=${t=>t.stopPropagation()}>
+                      <button
+                        class="control-btn"
+                        @click=${this._togglePlay}
+                        aria-label="${this._videoEl?.paused?Cc(this.hass,"card.play"):Cc(this.hass,"card.pause")}"
+                        title="${this._videoEl?.paused?Cc(this.hass,"card.play"):Cc(this.hass,"card.pause")}"
+                      >
+                        <ha-icon icon="${this._videoEl?.paused?"mdi:play":"mdi:pause"}"></ha-icon>
+                      </button>
+                      <div class="spacer"></div>
+                      ${"undefined"!=typeof document&&"pictureInPictureEnabled"in document&&document.pictureInPictureEnabled?V`
+                              <button
+                                class="control-btn"
+                                @click=${this._togglePiP}
+                                aria-label="${Cc(this.hass,"card.picture_in_picture")}"
+                                title="${Cc(this.hass,"card.picture_in_picture")}"
+                              >
+                                <ha-icon icon="mdi:picture-in-picture-bottom-right"></ha-icon>
+                              </button>
+                            `:""}
+                      <button
+                        class="control-btn"
+                        @click=${this._toggleFullscreen}
+                        aria-label="${document.fullscreenElement?Cc(this.hass,"card.exit_fullscreen"):Cc(this.hass,"card.fullscreen")}"
+                        title="${document.fullscreenElement?Cc(this.hass,"card.exit_fullscreen"):Cc(this.hass,"card.fullscreen")}"
+                      >
+                        <ha-icon
+                          icon="${document.fullscreenElement?"mdi:fullscreen-exit":"mdi:fullscreen"}"
+                        ></ha-icon>
+                      </button>
+                    </div>
+                  `:""}
           </div>
 
           <div class="webcam-info">
@@ -126,16 +128,16 @@ const dt={attribute:!0,type:String,converter:T,reflect:!1,hasChanged:S},ct=(t=dt
             ${o?V`<p class="webcam-location"><ha-icon icon="mdi:map-marker"></ha-icon> ${o}</p>`:""}
             ${i&&i!==s?V`<p class="webcam-description">${i}</p>`:""}
             ${this._config.show_link&&e.attributes.source?V`
-                  <a
-                    href="${e.attributes.source}"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="webcam-source-link"
-                    @click=${t=>t.stopPropagation()}
-                  >
-                    <ha-icon icon="mdi:open-in-new"></ha-icon> ${Cc(this.hass,"card.view_on_skylinewebcams")}
-                  </a>
-                `:""}
+                    <a
+                      href="${e.attributes.source}"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="webcam-source-link"
+                      @click=${t=>t.stopPropagation()}
+                    >
+                      <ha-icon icon="mdi:open-in-new"></ha-icon> ${Cc(this.hass,"card.view_on_skylinewebcams")}
+                    </a>
+                  `:""}
           </div>
         </div>
       </ha-card>

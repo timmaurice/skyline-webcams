@@ -32,6 +32,7 @@ This card is available in the [Home Assistant Community Store (HACS)](https://ha
 1.  Download the `custom_components/skylinewebcams` folder.
 2.  Copy it to your Home Assistant `config/custom_components/` directory.
 3.  Restart Home Assistant.
+
 </details>
 
 ### Docker (Development & Testing)

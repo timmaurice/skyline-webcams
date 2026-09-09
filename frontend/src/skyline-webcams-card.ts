@@ -422,13 +422,15 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
       const errorTitle = this._config.title || localize(this.hass, 'card.default_title');
       return html`
         <ha-card>
-          ${errorTitle
-            ? html`
-                <h1 class="card-header" @click=${this._handleMoreInfo} title="Open entity">
-                  <div class="name" dir="ltr">${errorTitle}</div>
-                </h1>
-              `
-            : ''}
+          ${
+            errorTitle
+              ? html`
+                  <h1 class="card-header" @click=${this._handleMoreInfo} title="Open entity">
+                    <div class="name" dir="ltr">${errorTitle}</div>
+                  </h1>
+                `
+              : ''
+          }
           <div class="card-content error-container">
             ${localize(this.hass, 'card.entity_not_found', { entity: entityId })}
           </div>
@@ -448,30 +450,38 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
 
     return html`
       <ha-card>
-        ${this._config.title
-          ? html`
-              <h1 class="card-header" @click=${this._handleMoreInfo} title="Open entity">
-                <div class="name" dir="ltr">${title}</div>
-              </h1>
-            `
-          : ''}
+        ${
+          this._config.title
+            ? html`
+                <h1 class="card-header" @click=${this._handleMoreInfo} title="Open entity">
+                  <div class="name" dir="ltr">${title}</div>
+                </h1>
+              `
+            : ''
+        }
         <div class="card-content">
           <div class="video-container" style="aspect-ratio: ${this._config.aspect_ratio || '16/9'};">
-            ${this._error
-              ? html`
-                  <div class="overlay error-overlay">
-                    <p class="error-msg">${this._error}</p>
-                    <button class="retry-btn" @click=${this._handleRetry}>${localize(this.hass, 'card.retry')}</button>
-                  </div>
-                `
-              : ''}
-            ${this._loading
-              ? html`
-                  <div class="overlay loading-overlay">
-                    <div class="spinner"></div>
-                  </div>
-                `
-              : ''}
+            ${
+              this._error
+                ? html`
+                    <div class="overlay error-overlay">
+                      <p class="error-msg">${this._error}</p>
+                      <button class="retry-btn" @click=${this._handleRetry}>
+                        ${localize(this.hass, 'card.retry')}
+                      </button>
+                    </div>
+                  `
+                : ''
+            }
+            ${
+              this._loading
+                ? html`
+                    <div class="overlay loading-overlay">
+                      <div class="spinner"></div>
+                    </div>
+                  `
+                : ''
+            }
 
             <video
               playsinline
@@ -483,74 +493,88 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
               @pause=${() => this.requestUpdate()}
             ></video>
 
-            ${this._config.show_video_controls !== false
-              ? html`
-                  <div class="video-controls" @click=${(e: Event) => e.stopPropagation()}>
-                    <button
-                      class="control-btn"
-                      @click=${this._togglePlay}
-                      aria-label="${this._videoEl?.paused
-                        ? localize(this.hass, 'card.play')
-                        : localize(this.hass, 'card.pause')}"
-                      title="${this._videoEl?.paused
-                        ? localize(this.hass, 'card.play')
-                        : localize(this.hass, 'card.pause')}"
-                    >
-                      <ha-icon icon="${this._videoEl?.paused ? 'mdi:play' : 'mdi:pause'}"></ha-icon>
-                    </button>
-                    <div class="spacer"></div>
-                    ${isPiPSupported()
-                      ? html`
-                          <button
-                            class="control-btn"
-                            @click=${this._togglePiP}
-                            aria-label="${localize(this.hass, 'card.picture_in_picture')}"
-                            title="${localize(this.hass, 'card.picture_in_picture')}"
-                          >
-                            <ha-icon icon="mdi:picture-in-picture-bottom-right"></ha-icon>
-                          </button>
-                        `
-                      : ''}
-                    <button
-                      class="control-btn"
-                      @click=${this._toggleFullscreen}
-                      aria-label="${document.fullscreenElement
-                        ? localize(this.hass, 'card.exit_fullscreen')
-                        : localize(this.hass, 'card.fullscreen')}"
-                      title="${document.fullscreenElement
-                        ? localize(this.hass, 'card.exit_fullscreen')
-                        : localize(this.hass, 'card.fullscreen')}"
-                    >
-                      <ha-icon
-                        icon="${document.fullscreenElement ? 'mdi:fullscreen-exit' : 'mdi:fullscreen'}"
-                      ></ha-icon>
-                    </button>
-                  </div>
-                `
-              : ''}
+            ${
+              this._config.show_video_controls !== false
+                ? html`
+                    <div class="video-controls" @click=${(e: Event) => e.stopPropagation()}>
+                      <button
+                        class="control-btn"
+                        @click=${this._togglePlay}
+                        aria-label="${
+                          this._videoEl?.paused ? localize(this.hass, 'card.play') : localize(this.hass, 'card.pause')
+                        }"
+                        title="${
+                          this._videoEl?.paused ? localize(this.hass, 'card.play') : localize(this.hass, 'card.pause')
+                        }"
+                      >
+                        <ha-icon icon="${this._videoEl?.paused ? 'mdi:play' : 'mdi:pause'}"></ha-icon>
+                      </button>
+                      <div class="spacer"></div>
+                      ${
+                        isPiPSupported()
+                          ? html`
+                              <button
+                                class="control-btn"
+                                @click=${this._togglePiP}
+                                aria-label="${localize(this.hass, 'card.picture_in_picture')}"
+                                title="${localize(this.hass, 'card.picture_in_picture')}"
+                              >
+                                <ha-icon icon="mdi:picture-in-picture-bottom-right"></ha-icon>
+                              </button>
+                            `
+                          : ''
+                      }
+                      <button
+                        class="control-btn"
+                        @click=${this._toggleFullscreen}
+                        aria-label="${
+                          document.fullscreenElement
+                            ? localize(this.hass, 'card.exit_fullscreen')
+                            : localize(this.hass, 'card.fullscreen')
+                        }"
+                        title="${
+                          document.fullscreenElement
+                            ? localize(this.hass, 'card.exit_fullscreen')
+                            : localize(this.hass, 'card.fullscreen')
+                        }"
+                      >
+                        <ha-icon
+                          icon="${document.fullscreenElement ? 'mdi:fullscreen-exit' : 'mdi:fullscreen'}"
+                        ></ha-icon>
+                      </button>
+                    </div>
+                  `
+                : ''
+            }
           </div>
 
           <div class="webcam-info">
-            ${!this._config.title && title
-              ? html`<h2 class="webcam-title" @click=${this._handleMoreInfo} title="Open entity">${title}</h2>`
-              : ''}
-            ${locationText
-              ? html`<p class="webcam-location"><ha-icon icon="mdi:map-marker"></ha-icon> ${locationText}</p>`
-              : ''}
+            ${
+              !this._config.title && title
+                ? html`<h2 class="webcam-title" @click=${this._handleMoreInfo} title="Open entity">${title}</h2>`
+                : ''
+            }
+            ${
+              locationText
+                ? html`<p class="webcam-location"><ha-icon icon="mdi:map-marker"></ha-icon> ${locationText}</p>`
+                : ''
+            }
             ${description && description !== title ? html`<p class="webcam-description">${description}</p>` : ''}
-            ${this._config.show_link && stateObj.attributes.source
-              ? html`
-                  <a
-                    href="${stateObj.attributes.source}"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="webcam-source-link"
-                    @click=${(e: Event) => e.stopPropagation()}
-                  >
-                    <ha-icon icon="mdi:open-in-new"></ha-icon> ${localize(this.hass, 'card.view_on_skylinewebcams')}
-                  </a>
-                `
-              : ''}
+            ${
+              this._config.show_link && stateObj.attributes.source
+                ? html`
+                    <a
+                      href="${stateObj.attributes.source}"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="webcam-source-link"
+                      @click=${(e: Event) => e.stopPropagation()}
+                    >
+                      <ha-icon icon="mdi:open-in-new"></ha-icon> ${localize(this.hass, 'card.view_on_skylinewebcams')}
+                    </a>
+                  `
+                : ''
+            }
           </div>
         </div>
       </ha-card>
