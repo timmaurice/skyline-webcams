@@ -8,6 +8,7 @@
   },
   "card": {
     "entity_not_found": "Entität nicht gefunden: {entity}",
+    "no_entity": "Wähle eine Kamera-Entität, um hier eine Webcam anzuzeigen.",
     "entity_unavailable": "Kamera nicht verfügbar \u2013 Verbindung wird automatisch wiederhergestellt.",
     "retry": "Wiederholen",
     "play": "Abspielen",

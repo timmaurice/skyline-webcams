@@ -177,6 +177,14 @@ video {
   font-weight: 500;
 }
 
+// A card nobody has picked an entity for yet. Not a failure, so not the error
+// colour: the card picker shows this one as its preview.
+.no-entity-hint {
+  color: var(--secondary-text-color, #727272);
+  padding: 16px;
+  text-align: center;
+}
+
 .webcam-source-link {
   display: inline-flex;
   align-items: center;

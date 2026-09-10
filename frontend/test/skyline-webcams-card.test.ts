@@ -19,13 +19,32 @@ describe('skyline-webcams-card', () => {
     expect(el).toBeInstanceOf(SkylineWebcamsCard);
   });
 
-  it('returns a stub config', () => {
+  it('falls back to an empty entity when there is no camera to stub with', () => {
+    // The suite used to assert this and "picks a real camera" side by side, as
+    // if the stub both did and did not name one. There is only one case where
+    // it cannot: a Home Assistant with no camera entity at all.
     const config = SkylineWebcamsCard.getStubConfig();
     expect(config).toEqual({
       entity: '',
       aspect_ratio: '16/9',
       show_video_controls: true,
     });
+
+    // And that config still has to preview, which is the whole point of a stub.
+    expect(() => el.setConfig(config as never)).not.toThrow();
+  });
+
+  it('renders a hint rather than an error when no entity is configured', async () => {
+    el.setConfig(SkylineWebcamsCard.getStubConfig() as never);
+    // @ts-expect-error Mocking minimal hass
+    el.hass = { states: {} };
+    await el.updateComplete;
+
+    const hint = el.shadowRoot?.querySelector('.no-entity-hint');
+    expect(hint).not.toBeNull();
+    expect(hint?.textContent?.trim()).toBe('Pick a camera entity to show a webcam here.');
+    // Not the error card the picker showed before.
+    expect(el.shadowRoot?.querySelector('.error-container')).toBeNull();
   });
 
   it('picks a real camera for the stub config so the picker preview works', () => {
@@ -65,10 +84,10 @@ describe('skyline-webcams-card', () => {
     expect(el.getGridOptions()).toEqual({ rows: 'auto', columns: 12, min_columns: 6 });
   });
 
-  it('throws an error if entity is missing in config', () => {
+  it('still rejects a config that is not there at all', () => {
     expect(() => {
       // @ts-expect-error Testing invalid config
-      el.setConfig({});
+      el.setConfig(undefined);
     }).toThrow('Please define a camera entity.');
   });
 

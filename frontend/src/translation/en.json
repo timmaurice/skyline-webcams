@@ -8,6 +8,7 @@
   },
   "card": {
     "entity_not_found": "Entity not found: {entity}",
+    "no_entity": "Pick a camera entity to show a webcam here.",
     "entity_unavailable": "Camera unavailable \u2014 reconnecting automatically.",
     "retry": "Retry",
     "play": "Play",

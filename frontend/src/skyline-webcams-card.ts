@@ -25,9 +25,12 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
   /**
    * Config the card picker previews with.
    *
-   * It used to hand back an empty entity, which setConfig rejects, so the
+   * It used to hand back an empty entity, which setConfig rejected, so the
    * preview in the picker was an error message. Pick a real camera instead:
-   * one of this integration's own if there is one, otherwise any camera.
+   * one of this integration's own if there is one, otherwise any camera. On a
+   * Home Assistant with no camera at all there is nothing to pick, so the
+   * entity stays empty and setConfig renders the hint below rather than
+   * throwing - the same error card, otherwise, by a longer route.
    */
   public static getStubConfig(hass?: HomeAssistant, entities?: string[]): Record<string, unknown> {
     const candidates = (entities?.length ? entities : Object.keys(hass?.states ?? {})).filter((entityId) =>
@@ -60,8 +63,16 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
   private _fullscreenListener?: () => void;
   private _intersectionObserver?: IntersectionObserver;
 
+  /**
+   * A card without an entity is unfinished, not invalid.
+   *
+   * Throwing on it made the card picker preview an error message on any Home
+   * Assistant with no camera to stub with, because the picker feeds the stub
+   * config straight back in here. It renders a hint instead. A missing config
+   * object is still a caller bug and still throws.
+   */
   public setConfig(config: SkylineWebcamsCardConfig): void {
-    if (!config || !config.entity) {
+    if (!config) {
       throw new Error('Please define a camera entity.');
     }
     this._config = config;
@@ -503,6 +514,15 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
     if (!this.hass || !this._config) return html``;
 
     const entityId = this._config.entity;
+
+    if (!entityId) {
+      return html`
+        <ha-card>
+          <div class="card-content no-entity-hint">${localize(this.hass, 'card.no_entity')}</div>
+        </ha-card>
+      `;
+    }
+
     const stateObj = this.hass.states[entityId];
 
     if (!stateObj) {
