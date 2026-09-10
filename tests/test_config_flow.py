@@ -119,8 +119,14 @@ async def test_the_title_comes_from_a_heading_with_child_tags(session):
     assert session.requested == [CAMERA_URL]
 
 
+@pytest.mark.timeout(5)
 async def test_a_hanging_request_gives_up(monkeypatch):
-    """Without a timeout the flow sat there for as long as the host wanted."""
+    """Without a timeout the flow sat there for as long as the host wanted.
+
+    The bound is what makes the absence of the fix a failure: the host this
+    stands in for sleeps for an hour, so a flow that no longer gives up would
+    otherwise hang the run instead of reporting.
+    """
 
     class HangingSession:
         def get(self, url, headers=None):
