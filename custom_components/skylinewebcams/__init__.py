@@ -7,7 +7,8 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN
+from .const import DOMAIN, CONF_URL
+from .helpers import async_migrated_unique_id
 import homeassistant.helpers.config_validation as cv
 
 _LOGGER = logging.getLogger(__name__)
@@ -112,6 +113,34 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         hass.bus.async_listen_once(
             EVENT_HOMEASSISTANT_STARTED, _async_register_lovelace_resource
         )
+
+    return True
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Move an entry keyed on the raw URL onto the normalised unique id.
+
+    Without this the normalisation only applied to entries added after it:
+    an older entry kept its raw-URL id, so _abort_if_unique_id_configured no
+    longer recognised the camera and adding it again from the UI created a
+    second entry for it - the duplicate the normalisation exists to prevent.
+    """
+    if entry.version > 1:
+        return True
+
+    unique_id = async_migrated_unique_id(
+        hass, entry.unique_id, entry.data.get(CONF_URL, "")
+    )
+    if unique_id != entry.unique_id:
+        _LOGGER.info(
+            "Migrating %s from unique id %s to %s",
+            entry.title,
+            entry.unique_id,
+            unique_id,
+        )
+        hass.config_entries.async_update_entry(entry, unique_id=unique_id, version=2)
+    else:
+        hass.config_entries.async_update_entry(entry, version=2)
 
     return True
 

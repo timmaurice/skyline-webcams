@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 from typing import Any
 from urllib.parse import urlparse
 
@@ -17,14 +16,13 @@ from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import DOMAIN, CONF_URL
+from .helpers import unique_id_for_url
 from .scraper import SkylineWebcamsScraper
 
 _LOGGER = logging.getLogger(__name__)
 
 ALLOWED_HOST = "skylinewebcams.com"
 VALIDATE_TIMEOUT_SECONDS = 15
-# The site serves the same camera under a language prefix, /en/..., /de/... .
-LANGUAGE_SEGMENT = re.compile(r"^[a-z]{2}$")
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
@@ -50,24 +48,6 @@ def is_webcam_url(url: str | None) -> bool:
         return False
     host = (parsed.hostname or "").lower()
     return host == ALLOWED_HOST or host.endswith("." + ALLOWED_HOST)
-
-
-def unique_id_for_url(url: str) -> str:
-    """Return one id for every spelling of the same camera page.
-
-    The raw URL was used before, so the /en/ and /de/ variants of a page, or
-    the same page with a trailing "?", each added another entry for the very
-    same webcam.
-    """
-    parsed = urlparse(url)
-    host = (parsed.hostname or "").lower()
-    if host.startswith("www."):
-        host = host[4:]
-    segments = [segment for segment in parsed.path.split("/") if segment]
-    if segments and LANGUAGE_SEGMENT.match(segments[0].lower()):
-        segments = segments[1:]
-    path = "/".join(segment.lower() for segment in segments)
-    return f"{host}/{path}"
 
 
 async def validate_input(hass, data):
@@ -105,7 +85,8 @@ async def validate_input(hass, data):
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for SkylineWebcams."""
 
-    VERSION = 1
+    # 2: entries are keyed on the normalised id, see async_migrate_entry.
+    VERSION = 2
 
     def __init__(self):
         """Initialize flow."""

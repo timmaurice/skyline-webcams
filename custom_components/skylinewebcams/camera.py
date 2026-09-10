@@ -28,6 +28,7 @@ import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
 
 from .const import DOMAIN
+from .helpers import async_migrated_unique_id
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -91,8 +92,10 @@ async def async_setup_platform(
     url = config[CONF_URL]
     name = config.get(CONF_NAME, "Skyline Webcam")
 
-    # Use URL as unique_id for YAML as well
-    unique_id = url
+    # The same normalised id the config entries use, so a camera configured in
+    # YAML and the same camera added through the UI are recognised as one. The
+    # entity keeps its registry entry: the id is migrated, not replaced.
+    unique_id = async_migrated_unique_id(hass, url, url)
     # For YAML, we use a hash of the URL as the entry_id for safe proxy routing
     entry_id = hashlib.md5(url.encode()).hexdigest()
 
