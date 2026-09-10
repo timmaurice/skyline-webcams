@@ -4,8 +4,7 @@ A camera whose page has gone away used to be re-scraped on every request the
 proxy served, which hammered skylinewebcams.com for a result that was not going
 to change. These pin the pause down.
 
-The async cases drive the event loop themselves, so the file runs with a plain
-pytest and does not depend on an asyncio plugin being present.
+The async cases run on pytest-asyncio in auto mode, configured in pytest.ini.
 """
 
 import asyncio
@@ -44,11 +43,7 @@ def count_fetches(camera, result):
     return calls
 
 
-def test_failed_fetch_is_not_retried_immediately():
-    asyncio.run(_test_failed_fetch_is_not_retried_immediately())
-
-
-async def _test_failed_fetch_is_not_retried_immediately():
+async def test_failed_fetch_is_not_retried_immediately():
     """The second request inside the window must not reach the site again."""
     camera = make_camera()
     calls = count_fetches(camera, None)
@@ -60,11 +55,7 @@ async def _test_failed_fetch_is_not_retried_immediately():
     assert camera._retry_not_before > 0
 
 
-def test_backoff_grows_and_stops_at_the_cap():
-    asyncio.run(_test_backoff_grows_and_stops_at_the_cap())
-
-
-async def _test_backoff_grows_and_stops_at_the_cap():
+async def test_backoff_grows_and_stops_at_the_cap():
     """Each failure waits longer, and the wait never exceeds the cap."""
     camera = make_camera()
     count_fetches(camera, None)
@@ -82,11 +73,7 @@ async def _test_backoff_grows_and_stops_at_the_cap():
     assert delays[-1] == pytest.approx(FETCH_BACKOFF_MAX_SECONDS, abs=1)
 
 
-def test_backing_off_still_serves_the_cached_url():
-    asyncio.run(_test_backing_off_still_serves_the_cached_url())
-
-
-async def _test_backing_off_still_serves_the_cached_url():
+async def test_backing_off_still_serves_the_cached_url():
     """A stale URL beats no URL, and matches what a failed fetch returns."""
     camera = make_camera()
     camera._stream_url = STREAM_URL
@@ -97,11 +84,7 @@ async def _test_backing_off_still_serves_the_cached_url():
     assert await camera.get_fresh_stream_url() == STREAM_URL  # inside the window
 
 
-def test_success_clears_the_backoff():
-    asyncio.run(_test_success_clears_the_backoff())
-
-
-async def _test_success_clears_the_backoff():
+async def test_success_clears_the_backoff():
     """A camera that recovers must not keep waiting out an old penalty."""
     camera = make_camera()
     count_fetches(camera, None)
@@ -116,11 +99,7 @@ async def _test_success_clears_the_backoff():
     assert camera._retry_not_before == 0.0
 
 
-def test_failure_count_stops_at_the_cap():
-    asyncio.run(_test_failure_count_stops_at_the_cap())
-
-
-async def _test_failure_count_stops_at_the_cap():
+async def test_failure_count_stops_at_the_cap():
     """Counting past the cap only feeds a bigger power to a clamped value."""
     camera = make_camera()
     count_fetches(camera, None)
@@ -132,11 +111,7 @@ async def _test_failure_count_stops_at_the_cap():
     assert camera._fetch_failures == MAX_BACKOFF_FAILURES
 
 
-def test_forced_refresh_ignores_the_backoff():
-    asyncio.run(_test_forced_refresh_ignores_the_backoff())
-
-
-async def _test_forced_refresh_ignores_the_backoff():
+async def test_forced_refresh_ignores_the_backoff():
     """The proxy forces a refresh when it knows the cached URL is dead.
 
     Handing that URL back because a backoff window happens to be open would

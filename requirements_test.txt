@@ -7,3 +7,8 @@ pytest-asyncio
 pytest-socket
 aiohttp
 pytest-mock
+# Dependencies of the Home Assistant integrations this one builds on
+# (camera, ffmpeg). Both are imported at module level, so without them the
+# camera platform cannot even be imported and the suite errors at collection.
+PyTurboJPEG
+ha-ffmpeg

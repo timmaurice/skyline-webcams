@@ -1,14 +1,12 @@
 """Tests for the Lovelace card resource registration.
 
-The async cases drive their own event loop so the suite runs on a plain pytest
-and does not depend on an asyncio plugin being present.
+The async cases run on pytest-asyncio in auto mode, configured in pytest.ini.
 """
 
 from __future__ import annotations
 
 import pytest
 
-import asyncio
 
 from custom_components.skylinewebcams import (
     CARD_FILENAME,
@@ -62,11 +60,7 @@ class FakeResources:
         self._items = [item for item in self._items if item["id"] != item_id]
 
 
-def test_registers_the_card_on_a_fresh_install() -> None:
-    asyncio.run(_test_registers_the_card_on_a_fresh_install())
-
-
-async def _test_registers_the_card_on_a_fresh_install() -> None:
+async def test_registers_the_card_on_a_fresh_install() -> None:
     """Without a resource for our bundle, exactly one is created."""
     resources = FakeResources()
 
@@ -75,11 +69,7 @@ async def _test_registers_the_card_on_a_fresh_install() -> None:
     assert [item["url"] for item in resources.async_items()] == [NEW_URL]
 
 
-def test_does_not_add_a_second_resource_on_restart() -> None:
-    asyncio.run(_test_does_not_add_a_second_resource_on_restart())
-
-
-async def _test_does_not_add_a_second_resource_on_restart() -> None:
+async def test_does_not_add_a_second_resource_on_restart() -> None:
     """Regression: the store is empty until loaded, so our own entry was missed.
 
     Every restart appended another resource, the browser loaded the bundle twice
@@ -101,11 +91,7 @@ async def _test_does_not_add_a_second_resource_on_restart() -> None:
     assert resources.async_items()[0]["id"] == "existing"
 
 
-def test_removes_duplicates_left_by_earlier_versions() -> None:
-    asyncio.run(_test_removes_duplicates_left_by_earlier_versions())
-
-
-async def _test_removes_duplicates_left_by_earlier_versions() -> None:
+async def test_removes_duplicates_left_by_earlier_versions() -> None:
     """An install that already collected duplicates is cleaned up on setup."""
     resources = FakeResources(
         [
@@ -132,11 +118,7 @@ async def _test_removes_duplicates_left_by_earlier_versions() -> None:
     assert [item["url"] for item in resources.async_items()] == [NEW_URL]
 
 
-def test_leaves_unrelated_resources_alone() -> None:
-    asyncio.run(_test_leaves_unrelated_resources_alone())
-
-
-async def _test_leaves_unrelated_resources_alone() -> None:
+async def test_leaves_unrelated_resources_alone() -> None:
     """Deleting somebody else's resource would be far worse than a leftover."""
     other = {
         "id": "other",
@@ -160,11 +142,7 @@ class UnloadableResources(FakeResources):
         raise RuntimeError("storage unavailable")
 
 
-def test_does_not_register_when_the_store_cannot_be_loaded() -> None:
-    asyncio.run(_test_does_not_register_when_the_store_cannot_be_loaded())
-
-
-async def _test_does_not_register_when_the_store_cannot_be_loaded() -> None:
+async def test_does_not_register_when_the_store_cannot_be_loaded() -> None:
     """A failed load must abort, not fall through to creating a resource.
 
     Creating one off an empty item list would save a store holding only our own
@@ -204,11 +182,7 @@ class UnknownCollection:
         return data
 
 
-def test_refuses_to_register_against_a_collection_it_cannot_load() -> None:
-    asyncio.run(_test_refuses_to_register_against_a_collection_it_cannot_load())
-
-
-async def _test_refuses_to_register_against_a_collection_it_cannot_load() -> None:
+async def test_refuses_to_register_against_a_collection_it_cannot_load() -> None:
     """Better no resource than a store with every other card's dropped."""
     resources = UnknownCollection()
 

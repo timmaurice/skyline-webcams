@@ -4,11 +4,9 @@ The proxy is served without authentication so the browser can play the stream,
 so it must never fetch a URL that a caller supplies. These tests pin that
 behaviour down.
 
-The async cases drive the event loop themselves, so the file runs with a plain
-pytest and does not depend on an asyncio plugin being present.
+The async cases run on pytest-asyncio in auto mode, configured in pytest.ini.
 """
 
-import asyncio
 import types
 
 import pytest
@@ -148,11 +146,7 @@ def test_segment_table_is_bounded():
     assert camera.resolve_segment_url(tokens[-1]) is not None
 
 
-def test_playlist_is_rewritten_to_tokens():
-    asyncio.run(_test_playlist_is_rewritten_to_tokens())
-
-
-async def _test_playlist_is_rewritten_to_tokens():
+async def test_playlist_is_rewritten_to_tokens():
     response = FakeResponse(
         headers={"Content-Type": "application/vnd.apple.mpegurl"}, text=PLAYLIST
     )
@@ -175,11 +169,7 @@ async def _test_playlist_is_rewritten_to_tokens():
     assert camera.resolve_segment_url(token) == SEGMENT_URL
 
 
-def test_caller_supplied_url_is_never_fetched():
-    asyncio.run(_test_caller_supplied_url_is_never_fetched())
-
-
-async def _test_caller_supplied_url_is_never_fetched():
+async def test_caller_supplied_url_is_never_fetched():
     camera, session = make_camera(FakeResponse(headers={"Content-Type": "video/mp2t"}))
     view = make_view(camera)
 
@@ -193,11 +183,7 @@ async def _test_caller_supplied_url_is_never_fetched():
     assert "http://127.0.0.1:8123/api/" not in session.requested
 
 
-def test_unknown_segment_token_is_refused():
-    asyncio.run(_test_unknown_segment_token_is_refused())
-
-
-async def _test_unknown_segment_token_is_refused():
+async def test_unknown_segment_token_is_refused():
     camera, session = make_camera(FakeResponse(headers={"Content-Type": "video/mp2t"}))
     view = make_view(camera)
 
@@ -209,11 +195,7 @@ async def _test_unknown_segment_token_is_refused():
     assert session.requested == []
 
 
-def test_segment_with_charset_content_type_is_served():
-    asyncio.run(_test_segment_with_charset_content_type_is_served())
-
-
-async def _test_segment_with_charset_content_type_is_served():
+async def test_segment_with_charset_content_type_is_served():
     response = FakeResponse(
         headers={"Content-Type": "video/mp2t; charset=utf-8"}, body=b"TSDATA"
     )
