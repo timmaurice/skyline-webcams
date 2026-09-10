@@ -26,3 +26,6 @@ yarn.lock
 # Playwright
 test-results/
 playwright-report/
+
+# Local machine compose override (corporate CA, local paths)
+docker-compose.override.yml
