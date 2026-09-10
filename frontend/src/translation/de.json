@@ -8,6 +8,7 @@
   },
   "card": {
     "entity_not_found": "Entität nicht gefunden: {entity}",
+    "entity_unavailable": "Kamera nicht verfügbar \u2013 Verbindung wird automatisch wiederhergestellt.",
     "retry": "Wiederholen",
     "play": "Abspielen",
     "pause": "Pausieren",

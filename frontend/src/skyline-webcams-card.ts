@@ -1,7 +1,7 @@
 import { LitElement, TemplateResult, html, unsafeCSS } from 'lit';
 import { property, state, query } from 'lit/decorators.js';
 import Hls from 'hls.js';
-import { HomeAssistant, LovelaceCard, LovelaceCardEditor, SkylineWebcamsCardConfig } from './types.js';
+import { HassEntity, HomeAssistant, LovelaceCard, LovelaceCardEditor, SkylineWebcamsCardConfig } from './types.js';
 import { localize } from './localize.js';
 import { isPiPSupported, togglePiP, toggleFullscreen, fireEvent } from './utils.js';
 import styles from './styles/card.styles.scss';
@@ -12,6 +12,10 @@ const ELEMENT_NAME = 'skyline-webcams-card';
 // Retry backoff, so a stream that keeps failing does not hammer the proxy.
 const RESTART_BASE_DELAY_MS = 1000;
 const RESTART_MAX_DELAY_MS = 30000;
+
+// States in which Home Assistant strips the attributes of the entity, entry_id
+// included. Without it there is nothing to point the proxy at.
+const UNAVAILABLE_STATES = ['unavailable', 'unknown'];
 
 export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
   public static async getConfigElement(): Promise<LovelaceCardEditor> {
@@ -32,6 +36,7 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
   @state() private _loading = false;
   @state() private _streamUrl?: string;
   @state() private _isIntersecting = false;
+  @state() private _unavailable = false;
 
   @query('video') private _videoEl?: HTMLVideoElement;
 
@@ -116,7 +121,8 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
       changedProps.has('_error') ||
       changedProps.has('_loading') ||
       changedProps.has('_streamUrl') ||
-      changedProps.has('_isIntersecting')
+      changedProps.has('_isIntersecting') ||
+      changedProps.has('_unavailable')
     ) {
       return true;
     }
@@ -135,6 +141,10 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
     return true;
   }
 
+  protected willUpdate(): void {
+    this._syncAvailability();
+  }
+
   protected updated(changedProperties: Map<string | number | symbol, unknown>): void {
     super.updated(changedProperties);
 
@@ -143,6 +153,40 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
       if (oldConfig?.entity !== this._config?.entity) {
         this._updatePlaybackState();
       }
+    }
+  }
+
+  private _isUnavailable(stateObj?: HassEntity): boolean {
+    return !stateObj || UNAVAILABLE_STATES.includes(stateObj.state);
+  }
+
+  /**
+   * Keeps the card in step with the availability of its camera.
+   *
+   * An unavailable camera has no attributes left, so the card cannot build a
+   * proxy URL and used to sit there as a silent black rectangle. Say so
+   * instead, and pick the stream up again by itself once the entity returns.
+   */
+  private _syncAvailability(): void {
+    if (!this.hass || !this._config?.entity) return;
+
+    const unavailable = this._isUnavailable(this.hass.states[this._config.entity]);
+    if (unavailable === this._unavailable) return;
+    this._unavailable = unavailable;
+
+    if (unavailable) {
+      // Nothing to play and nothing to retry against, so stop rather than let
+      // the player run into errors it cannot recover from.
+      this._destroyHls();
+      this._error = undefined;
+    } else {
+      // Back again. The delay so far was earned by stream errors, not by this
+      // camera being offline, so start from the short delay again - otherwise
+      // a camera that flapped a few times stays black for the full 30s.
+      this._restartAttempts = 0;
+      // Go through the same backoff timer the stream errors use, so a camera
+      // that flaps does not restart the player on every state change it sends.
+      this._scheduleRestart();
     }
   }
 
@@ -206,6 +250,16 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
       const stateObj = this.hass.states[this._config.entity];
       if (!stateObj) {
         throw new Error(`Entity not found: ${this._config.entity}`);
+      }
+
+      if (this._isUnavailable(stateObj)) {
+        // entry_id is gone with the rest of the attributes. Bail out quietly,
+        // the availability watcher restarts us when the camera is back.
+        console.debug(`skyline-webcams-card: ${this._config.entity} is unavailable, not starting a stream`);
+        this._unavailable = true;
+        this._loading = false;
+        this.requestUpdate();
+        return;
       }
 
       const entryId = stateObj.attributes.entry_id;
@@ -354,6 +408,13 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
 
     this._restartTimer = window.setTimeout(() => {
       this._restartTimer = undefined;
+      // The same gate every other start passes through. A card that is hidden,
+      // scrolled out of view or whose camera is unavailable must not open a
+      // stream nobody is watching - whatever brings it back (visibility,
+      // intersection, the entity returning) starts it then.
+      if (this._unavailable || document.visibilityState !== 'visible' || !this._isIntersecting) {
+        return;
+      }
       this._startStream();
     }, delay);
   }
@@ -461,6 +522,16 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
         }
         <div class="card-content">
           <div class="video-container" style="aspect-ratio: ${this._config.aspect_ratio || '16/9'};">
+            ${
+              this._unavailable
+                ? html`
+                    <div class="overlay unavailable-overlay">
+                      <ha-icon icon="mdi:video-off"></ha-icon>
+                      <p class="unavailable-msg">${localize(this.hass, 'card.entity_unavailable')}</p>
+                    </div>
+                  `
+                : ''
+            }
             ${
               this._error
                 ? html`
@@ -592,11 +663,13 @@ if (!customElements.get(ELEMENT_NAME)) {
 
 // Register custom card in Home Assistant picker
 window.customCards = window.customCards || [];
-window.customCards.push({
-  type: ELEMENT_NAME,
-  name: 'Skyline Webcams Card',
-  description:
-    'A dedicated Lovelace card for Skyline Webcams supporting robust HLS streaming and automatic reconnection.',
-  preview: true,
-  documentationURL: 'https://github.com/timmaurice/skyline-webcams',
-});
+if (!window.customCards.some((card) => card.type === ELEMENT_NAME)) {
+  window.customCards.push({
+    type: ELEMENT_NAME,
+    name: 'Skyline Webcams Card',
+    description:
+      'A dedicated Lovelace card for Skyline Webcams supporting robust HLS streaming and automatic reconnection.',
+    preview: true,
+    documentationURL: 'https://github.com/timmaurice/skyline-webcams',
+  });
+}

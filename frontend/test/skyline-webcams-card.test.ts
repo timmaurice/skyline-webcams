@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import '../src/skyline-webcams-card.js';
 import { SkylineWebcamsCard } from '../src/skyline-webcams-card.js';
 
@@ -12,6 +12,7 @@ describe('skyline-webcams-card', () => {
 
   afterEach(() => {
     document.body.removeChild(el);
+    vi.useRealTimers();
   });
 
   it('is defined', () => {
@@ -147,5 +148,97 @@ describe('skyline-webcams-card', () => {
       // @ts-expect-error Testing private method
       el._toggleFullscreen(mockEvent);
     }).not.toThrow();
+  });
+
+  it('shows an unavailable state instead of a black area when the camera goes unavailable', async () => {
+    el.setConfig({ entity: 'camera.test_cam' });
+    // Home Assistant strips the attributes of an unavailable entity, so entry_id is gone.
+    // @ts-expect-error Mocking minimal hass
+    el.hass = {
+      states: {
+        'camera.test_cam': { state: 'unavailable', attributes: {} },
+      },
+      callWS: () => Promise.resolve({ url: '/api/mock' }),
+    };
+    await el.updateComplete;
+
+    const overlay = el.shadowRoot?.querySelector('.unavailable-overlay');
+    expect(overlay).not.toBeNull();
+    expect(overlay?.textContent?.trim()).not.toBe('');
+  });
+
+  it('restarts the stream through the backoff timer once the camera comes back', async () => {
+    vi.useFakeTimers();
+    el.setConfig({ entity: 'camera.test_cam' });
+    // @ts-expect-error Mocking minimal hass
+    el.hass = {
+      states: {
+        'camera.test_cam': { state: 'unavailable', attributes: {} },
+      },
+      callWS: () => Promise.resolve({ url: '/api/mock' }),
+    };
+    await el.updateComplete;
+    expect(el.shadowRoot?.querySelector('.unavailable-overlay')).not.toBeNull();
+
+    // @ts-expect-error Testing private method
+    const startSpy = vi.spyOn(el, '_startStream');
+    // The card is on screen, which is what the restart timer checks before it
+    // opens a stream.
+    // @ts-expect-error Testing private state
+    el._isIntersecting = true;
+
+    // @ts-expect-error Mocking minimal hass
+    el.hass = {
+      states: {
+        'camera.test_cam': {
+          state: 'idle',
+          attributes: { friendly_name: 'Test Cam', entry_id: 'abc123' },
+        },
+      },
+      callWS: () => Promise.resolve({ url: '/api/mock' }),
+    };
+    await el.updateComplete;
+
+    expect(startSpy).not.toHaveBeenCalled(); // waits for the backoff delay
+    vi.advanceTimersByTime(1000);
+    expect(startSpy).toHaveBeenCalled();
+    // @ts-expect-error Testing private state
+    expect(el._streamUrl).toContain('/api/skylinewebcams_proxy/abc123.m3u8');
+
+    await el.updateComplete;
+    expect(el.shadowRoot?.querySelector('.unavailable-overlay')).toBeNull();
+  });
+  it('does not start a stream on a card that is scrolled out of view', async () => {
+    vi.useFakeTimers();
+    el.setConfig({ entity: 'camera.test_cam' });
+    // @ts-expect-error Mocking minimal hass
+    el.hass = {
+      states: {
+        'camera.test_cam': { state: 'unavailable', attributes: {} },
+      },
+      callWS: () => Promise.resolve({ url: '/api/mock' }),
+    };
+    await el.updateComplete;
+
+    // @ts-expect-error Testing private method
+    const startSpy = vi.spyOn(el, '_startStream');
+    // Never scrolled into view, so nobody is watching this card.
+    // @ts-expect-error Testing private state
+    el._isIntersecting = false;
+
+    // @ts-expect-error Mocking minimal hass
+    el.hass = {
+      states: {
+        'camera.test_cam': {
+          state: 'idle',
+          attributes: { friendly_name: 'Test Cam', entry_id: 'abc123' },
+        },
+      },
+      callWS: () => Promise.resolve({ url: '/api/mock' }),
+    };
+    await el.updateComplete;
+
+    vi.advanceTimersByTime(30000);
+    expect(startSpy).not.toHaveBeenCalled();
   });
 });

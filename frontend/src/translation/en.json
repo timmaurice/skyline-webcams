@@ -8,6 +8,7 @@
   },
   "card": {
     "entity_not_found": "Entity not found: {entity}",
+    "entity_unavailable": "Camera unavailable \u2014 reconnecting automatically.",
     "retry": "Retry",
     "play": "Play",
     "pause": "Pause",

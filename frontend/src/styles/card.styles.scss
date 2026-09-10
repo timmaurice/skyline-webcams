@@ -53,6 +53,24 @@ video {
   text-align: center;
 }
 
+.unavailable-overlay {
+  background: rgba(0, 0, 0, 0.8);
+  color: #fff;
+  padding: 20px;
+  text-align: center;
+  gap: 8px;
+
+  ha-icon {
+    --mdc-icon-size: 40px;
+  }
+}
+
+.unavailable-msg {
+  font-size: 1rem;
+  font-weight: 500;
+  margin: 0;
+}
+
 .error-msg {
   font-size: 1rem;
   font-weight: 500;
