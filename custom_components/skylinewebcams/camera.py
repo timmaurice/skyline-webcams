@@ -332,7 +332,12 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
         self._attr_name = name
         self._attr_unique_id = unique_id
         self._stream_url = None
-        self._last_update = 0
+        # -inf, not 0: the clock behind _is_cached is asyncio's monotonic one,
+        # whose origin is the machine's boot. On a freshly booted host 0 sits
+        # inside the 120-second window, so "never fetched" would read as "just
+        # fetched" - which is exactly how a CI runner differs from a laptop that
+        # has been up for days.
+        self._last_update = float("-inf")
         # Bumped whenever a scrape replaces the URL, and whenever one runs at
         # all. Together they tell a caller waiting on the lock whether what it
         # would ask for has already happened.

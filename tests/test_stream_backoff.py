@@ -128,3 +128,25 @@ async def test_forced_refresh_ignores_the_backoff():
 
     count_fetches(camera, STREAM_URL + "&fresh=1")
     assert await camera.get_fresh_stream_url(force=True) == STREAM_URL + "&fresh=1"
+
+
+async def test_a_camera_that_never_fetched_is_not_treated_as_cached(monkeypatch):
+    """`_last_update` starts at -inf so uptime cannot make it look fresh.
+
+    `_is_cached` measures against asyncio's monotonic clock, whose origin is the
+    machine's boot. With an initial 0, a host that booted less than two minutes
+    ago put "never fetched" inside the 120-second window, so a camera holding a
+    URL from somewhere other than a fetch was handed it instead of scraping.
+    That is green on a laptop that has been up for days and red on a fresh CI
+    runner, so the clock is pinned here rather than left to the machine.
+    """
+    camera = make_camera()
+    camera._stream_url = STREAM_URL
+    monkeypatch.setattr(asyncio.get_running_loop(), "time", lambda: 30.0)
+
+    assert camera._is_cached(force=False) is False
+
+    calls = count_fetches(camera, None)
+    await camera.get_fresh_stream_url()
+
+    assert len(calls) == 1
