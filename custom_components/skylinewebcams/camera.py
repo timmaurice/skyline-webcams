@@ -34,6 +34,16 @@ _LOGGER = logging.getLogger(__name__)
 
 ALLOWED_STREAM_HOST = "skylinewebcams.com"
 
+# Backoff for the scraper, so a camera whose page is down does not get scraped
+# again on every single proxy request. While the backoff runs, the cached URL is
+# handed back unchanged: it may still play, and re-scraping a page that just
+# failed would not have produced a better one.
+FETCH_BACKOFF_BASE_SECONDS = 5
+FETCH_BACKOFF_MAX_SECONDS = 300
+# 5s * 2**6 = 320s, already past the cap above. Counting failures beyond this
+# only builds a bigger power for a value the cap flattens anyway.
+MAX_BACKOFF_FAILURES = 7
+
 
 def is_allowed_stream_url(url: str | None) -> bool:
     """Check that a URL points at SkylineWebcams over HTTP(S).
@@ -191,9 +201,11 @@ class SkylineWebcamsHlsProxyView(HomeAssistantView):
 
                     # Check if token is expired (empty playlist or copyright violation)
                     if "copyright_violation" in text or ".ts" not in text:
-                        # Token is invalid, force refresh
-                        camera._last_update = 0
-                        target_url = await camera.get_fresh_stream_url()
+                        # Token is invalid, force refresh. This bypasses the
+                        # backoff as well as the cache: the URL we hold is
+                        # provably dead, so serving it again is worse than
+                        # scraping once more.
+                        target_url = await camera.get_fresh_stream_url(force=True)
                         if not target_url:
                             return web.Response(
                                 status=502, text="Failed to fetch fresh stream URL"
@@ -319,6 +331,8 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
         self._attr_unique_id = unique_id
         self._stream_url = None
         self._last_update = 0
+        self._fetch_failures = 0
+        self._retry_not_before = 0.0
         self._additional_attributes = {"source": self._url}
         self._attr_available = True
         self._session = None
@@ -472,17 +486,52 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
         )
         return proxy_url
 
-    async def get_fresh_stream_url(self) -> str | None:
-        """Get a fresh URL, caching it for 2 minutes to avoid rate limits."""
+    async def get_fresh_stream_url(self, force: bool = False) -> str | None:
+        """Get a fresh URL, caching it for 2 minutes to avoid rate limits.
+
+        `force` skips both the cache and the backoff. The caller uses it when it
+        has proof the cached URL is dead - handing that same URL back would only
+        buy another failed fetch.
+        """
         now = asyncio.get_event_loop().time()
 
-        if self._stream_url and (now - self._last_update < 120):
+        if not force and self._stream_url and (now - self._last_update < 120):
+            return self._stream_url
+
+        if not force and now < self._retry_not_before:
+            _LOGGER.debug(
+                "[%s] Skipping stream URL fetch, backing off for another %.0fs",
+                self._attr_name,
+                self._retry_not_before - now,
+            )
+            # The cached URL, same as the failure path below: it may be stale,
+            # but handing back None where a fetch would have returned the old
+            # one only makes the backoff window worse than the failure it is
+            # protecting against.
             return self._stream_url
 
         url = await self._fetch_stream_url()
         if url:
             self._stream_url = url
             self._last_update = asyncio.get_event_loop().time()
+            self._fetch_failures = 0
+            self._retry_not_before = 0.0
+        else:
+            # Stop counting once the delay is capped: a camera whose page
+            # stays gone for weeks would otherwise raise 2 to an ever growing
+            # power for a value that is clamped to five minutes anyway.
+            self._fetch_failures = min(self._fetch_failures + 1, MAX_BACKOFF_FAILURES)
+            delay = min(
+                FETCH_BACKOFF_BASE_SECONDS * 2 ** (self._fetch_failures - 1),
+                FETCH_BACKOFF_MAX_SECONDS,
+            )
+            self._retry_not_before = asyncio.get_event_loop().time() + delay
+            _LOGGER.debug(
+                "[%s] Stream URL fetch failed %d time(s), next attempt in %ds",
+                self._attr_name,
+                self._fetch_failures,
+                delay,
+            )
 
         return self._stream_url
 
