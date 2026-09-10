@@ -141,17 +141,17 @@ views:
 
   - type: sections
     sections:
-    - type: grid
-      cards:
-      - type: custom:skyline-webcams-card
-        entity: camera.kenya_tsavo_east_national_park
-        aspect_ratio: 16/9
-        show_link: true
-    - type: grid
-      cards:
-      - type: custom:skyline-webcams-card
-        entity: camera.shanghai_skyline
-        aspect_ratio: 16/9
-        show_video_controls: true
+      - type: grid
+        cards:
+          - type: custom:skyline-webcams-card
+            entity: camera.kenya_tsavo_east_national_park
+            aspect_ratio: 16/9
+            show_link: true
+      - type: grid
+        cards:
+          - type: custom:skyline-webcams-card
+            entity: camera.shanghai_skyline
+            aspect_ratio: 16/9
+            show_video_controls: true
     title: Test
     icon: mdi:test-tube
