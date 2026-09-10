@@ -43,7 +43,7 @@ For a quick trial or development, a Docker environment is provided.
 2.  Run `docker compose up`.
 3.  Access Home Assistant at [http://localhost:8131](http://localhost:8131) (the compose file maps container port 8123 to 8131).
 
-The Docker environment comes **pre-configured** with five live webcams (Neuschwanstein Castle, Tsavo East, Venice, Rome and Lindenfels) and a dashboard that shows both the standard camera card and the bundled custom card, so you can see it in action immediately.
+The Docker environment comes **pre-configured** with five live webcams (Neuschwanstein Castle, Tsavo East, Venice, Rome and Shanghai) and a dashboard that shows both the standard camera card and the bundled custom card, so you can see it in action immediately.
 
 ## Configuration
 
