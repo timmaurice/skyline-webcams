@@ -5,5 +5,13 @@ lxml
 pytest
 pytest-asyncio
 pytest-socket
+# A test that waits for something that never comes must fail, not hang the
+# CI job to its limit: the suite carries a global timeout in pytest.ini.
+pytest-timeout
 aiohttp
 pytest-mock
+# Dependencies of the Home Assistant integrations this one builds on
+# (camera, ffmpeg). Both are imported at module level, so without them the
+# camera platform cannot even be imported and the suite errors at collection.
+PyTurboJPEG
+ha-ffmpeg

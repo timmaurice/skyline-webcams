@@ -13,3 +13,9 @@ custom_components/skylinewebcams/skyline-webcams-card.js
 # Lock files and system files
 package-lock.json
 .DS_Store
+
+# Playwright generated artefacts
+test/e2e/.auth.json
+test/e2e/.storage-state.json
+test-results
+playwright-report

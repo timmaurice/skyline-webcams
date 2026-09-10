@@ -97,7 +97,7 @@ export class SkylineWebcamsCardEditor extends LitElement implements LovelaceCard
         .hass=${this.hass}
         .data=${formData}
         .schema=${SCHEMA}
-        .computeLabel=${this._computeLabel}
+        .computeLabel=${(schema: { name: string }) => this._computeLabel(schema)}
         @value-changed=${this._valueChanged}
       ></ha-form>
     `;

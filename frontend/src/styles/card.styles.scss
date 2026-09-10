@@ -53,6 +53,24 @@ video {
   text-align: center;
 }
 
+.unavailable-overlay {
+  background: rgba(0, 0, 0, 0.8);
+  color: #fff;
+  padding: 20px;
+  text-align: center;
+  gap: 8px;
+
+  ha-icon {
+    --mdc-icon-size: 40px;
+  }
+}
+
+.unavailable-msg {
+  font-size: 1rem;
+  font-weight: 500;
+  margin: 0;
+}
+
 .error-msg {
   font-size: 1rem;
   font-weight: 500;
@@ -157,6 +175,14 @@ video {
   padding: 16px;
   text-align: center;
   font-weight: 500;
+}
+
+// A card nobody has picked an entity for yet. Not a failure, so not the error
+// colour: the card picker shows this one as its preview.
+.no-entity-hint {
+  color: var(--secondary-text-color, #727272);
+  padding: 16px;
+  text-align: center;
 }
 
 .webcam-source-link {

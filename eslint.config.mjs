@@ -7,7 +7,15 @@ import prettierConfig from 'eslint-config-prettier';
 
 export default tseslint.config(
   {
-    ignores: ['custom_components/**', 'node_modules/**', 'frontend/node_modules/**'],
+    ignores: [
+      'custom_components/**',
+      'node_modules/**',
+      'frontend/node_modules/**',
+      'playwright-report/**',
+      'test-results/**',
+      'venv/**',
+      '.venv/**',
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

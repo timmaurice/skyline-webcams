@@ -1,5 +1,40 @@
 title: 'SkylineWebcams World Tour'
 views:
+  - title: Custom Card Tour
+    icon: mdi:webcam
+    type: sections
+    sections:
+      - type: grid
+        cards:
+          - type: custom:skyline-webcams-card
+            entity: camera.schwangau_neuschwanstein_castle
+            aspect_ratio: 16/9
+            show_link: true
+      - type: grid
+        cards:
+          - type: custom:skyline-webcams-card
+            entity: camera.kenya_tsavo_east_national_park
+            aspect_ratio: 16/9
+            show_link: true
+      - type: grid
+        cards:
+          - type: custom:skyline-webcams-card
+            entity: camera.venice_st_mark_square
+            aspect_ratio: 16/9
+            show_link: true
+      - type: grid
+        cards:
+          - type: custom:skyline-webcams-card
+            entity: camera.rome_pantheon
+            aspect_ratio: 16/9
+            show_link: true
+      - type: grid
+        cards:
+          - type: custom:skyline-webcams-card
+            entity: camera.shanghai_skyline
+            aspect_ratio: 16/9
+            show_link: true
+
   - title: Global Webcams
     icon: mdi:earth
     type: sections
@@ -104,16 +139,8 @@ views:
 
               [🔗 View live webcam]({{ state_attr('camera.rome_pantheon', 'source') }})
 
-  - title: Custom Card Tour
-    icon: mdi:webcam
-    type: sections
+  - type: sections
     sections:
-      - type: grid
-        cards:
-          - type: custom:skyline-webcams-card
-            entity: camera.schwangau_neuschwanstein_castle
-            aspect_ratio: 16/9
-            show_link: true
       - type: grid
         cards:
           - type: custom:skyline-webcams-card
@@ -123,18 +150,8 @@ views:
       - type: grid
         cards:
           - type: custom:skyline-webcams-card
-            entity: camera.venice_st_mark_square
-            aspect_ratio: 16/9
-            show_link: true
-      - type: grid
-        cards:
-          - type: custom:skyline-webcams-card
-            entity: camera.rome_pantheon
-            aspect_ratio: 16/9
-            show_link: true
-      - type: grid
-        cards:
-          - type: custom:skyline-webcams-card
             entity: camera.shanghai_skyline
             aspect_ratio: 16/9
-            show_link: true
+            show_video_controls: true
+    title: Test
+    icon: mdi:test-tube

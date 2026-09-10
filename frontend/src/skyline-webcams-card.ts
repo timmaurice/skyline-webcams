@@ -1,7 +1,7 @@
 import { LitElement, TemplateResult, html, unsafeCSS } from 'lit';
 import { property, state, query } from 'lit/decorators.js';
 import Hls from 'hls.js';
-import { HomeAssistant, LovelaceCard, LovelaceCardEditor, SkylineWebcamsCardConfig } from './types.js';
+import { HassEntity, HomeAssistant, LovelaceCard, LovelaceCardEditor, SkylineWebcamsCardConfig } from './types.js';
 import { localize } from './localize.js';
 import { isPiPSupported, togglePiP, toggleFullscreen, fireEvent } from './utils.js';
 import styles from './styles/card.styles.scss';
@@ -9,14 +9,38 @@ import './skyline-webcams-card-editor.js';
 
 const ELEMENT_NAME = 'skyline-webcams-card';
 
+// Retry backoff, so a stream that keeps failing does not hammer the proxy.
+const RESTART_BASE_DELAY_MS = 1000;
+const RESTART_MAX_DELAY_MS = 30000;
+
+// States in which Home Assistant strips the attributes of the entity, entry_id
+// included. Without it there is nothing to point the proxy at.
+const UNAVAILABLE_STATES = ['unavailable', 'unknown'];
+
 export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
   public static async getConfigElement(): Promise<LovelaceCardEditor> {
     return document.createElement('skyline-webcams-card-editor') as LovelaceCardEditor;
   }
 
-  public static getStubConfig(): Record<string, unknown> {
+  /**
+   * Config the card picker previews with.
+   *
+   * It used to hand back an empty entity, which setConfig rejected, so the
+   * preview in the picker was an error message. Pick a real camera instead:
+   * one of this integration's own if there is one, otherwise any camera. On a
+   * Home Assistant with no camera at all there is nothing to pick, so the
+   * entity stays empty and setConfig renders the hint below rather than
+   * throwing - the same error card, otherwise, by a longer route.
+   */
+  public static getStubConfig(hass?: HomeAssistant, entities?: string[]): Record<string, unknown> {
+    const candidates = (entities?.length ? entities : Object.keys(hass?.states ?? {})).filter((entityId) =>
+      entityId.startsWith('camera.'),
+    );
+    const isSkyline = (entityId: string): boolean =>
+      String(hass?.states?.[entityId]?.attributes?.source ?? '').includes('skylinewebcams');
+
     return {
-      entity: '',
+      entity: candidates.find(isSkyline) ?? candidates[0] ?? '',
       aspect_ratio: '16/9',
       show_video_controls: true,
     };
@@ -28,16 +52,27 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
   @state() private _loading = false;
   @state() private _streamUrl?: string;
   @state() private _isIntersecting = false;
+  @state() private _unavailable = false;
 
   @query('video') private _videoEl?: HTMLVideoElement;
 
   private _hls?: Hls;
+  private _restartTimer?: number;
+  private _restartAttempts = 0;
   private _visibilityListener?: () => void;
   private _fullscreenListener?: () => void;
   private _intersectionObserver?: IntersectionObserver;
 
+  /**
+   * A card without an entity is unfinished, not invalid.
+   *
+   * Throwing on it made the card picker preview an error message on any Home
+   * Assistant with no camera to stub with, because the picker feeds the stub
+   * config straight back in here. It renders a hint instead. A missing config
+   * object is still a caller bug and still throws.
+   */
   public setConfig(config: SkylineWebcamsCardConfig): void {
-    if (!config || !config.entity) {
+    if (!config) {
       throw new Error('Please define a camera entity.');
     }
     this._config = config;
@@ -45,6 +80,19 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
 
   public getCardSize(): number {
     return 4;
+  }
+
+  /**
+   * Sizing hint for the sections view. A 16/9 video wants the full column
+   * width and a height that follows the aspect ratio rather than a fixed
+   * number of grid rows.
+   */
+  public getGridOptions(): Record<string, unknown> {
+    return {
+      rows: 'auto',
+      columns: 12,
+      min_columns: 6,
+    };
   }
 
   public connectedCallback(): void {
@@ -96,6 +144,12 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
       this._intersectionObserver.disconnect();
       this._intersectionObserver = undefined;
     }
+    // Home Assistant takes the card out of the DOM when the view changes and
+    // puts it back when the view returns. The observer then reports the very
+    // same value it had before, which is no change and therefore no trigger,
+    // and the card would stay on its poster for good. Forget the old value so
+    // coming back on screen counts as a change again.
+    this._isIntersecting = false;
     this._destroyHls();
   }
   protected shouldUpdate(changedProps: import('lit').PropertyValues): boolean {
@@ -104,7 +158,8 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
       changedProps.has('_error') ||
       changedProps.has('_loading') ||
       changedProps.has('_streamUrl') ||
-      changedProps.has('_isIntersecting')
+      changedProps.has('_isIntersecting') ||
+      changedProps.has('_unavailable')
     ) {
       return true;
     }
@@ -123,6 +178,10 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
     return true;
   }
 
+  protected willUpdate(): void {
+    this._syncAvailability();
+  }
+
   protected updated(changedProperties: Map<string | number | symbol, unknown>): void {
     super.updated(changedProperties);
 
@@ -131,6 +190,40 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
       if (oldConfig?.entity !== this._config?.entity) {
         this._updatePlaybackState();
       }
+    }
+  }
+
+  private _isUnavailable(stateObj?: HassEntity): boolean {
+    return !stateObj || UNAVAILABLE_STATES.includes(stateObj.state);
+  }
+
+  /**
+   * Keeps the card in step with the availability of its camera.
+   *
+   * An unavailable camera has no attributes left, so the card cannot build a
+   * proxy URL and used to sit there as a silent black rectangle. Say so
+   * instead, and pick the stream up again by itself once the entity returns.
+   */
+  private _syncAvailability(): void {
+    if (!this.hass || !this._config?.entity) return;
+
+    const unavailable = this._isUnavailable(this.hass.states[this._config.entity]);
+    if (unavailable === this._unavailable) return;
+    this._unavailable = unavailable;
+
+    if (unavailable) {
+      // Nothing to play and nothing to retry against, so stop rather than let
+      // the player run into errors it cannot recover from.
+      this._destroyHls();
+      this._error = undefined;
+    } else {
+      // Back again. The delay so far was earned by stream errors, not by this
+      // camera being offline, so start from the short delay again - otherwise
+      // a camera that flapped a few times stays black for the full 30s.
+      this._restartAttempts = 0;
+      // Go through the same backoff timer the stream errors use, so a camera
+      // that flaps does not restart the player on every state change it sends.
+      this._scheduleRestart();
     }
   }
 
@@ -152,6 +245,11 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
   private _streamSessionId = 0;
 
   private _destroyHls(): void {
+    // Invalidate a start that is still in flight, so it cannot attach a player
+    // to a card that was torn down in the meantime.
+    this._streamSessionId++;
+    this._clearRestartTimer();
+
     if (this._hls) {
       console.debug('skyline-webcams-card: destroying hls instance');
       this._hls.stopLoad();
@@ -160,20 +258,25 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
       this._hls = undefined;
     }
     if (this._videoEl) {
+      this._videoEl.onerror = null;
       this._videoEl.pause();
       this._videoEl.removeAttribute('src');
       this._videoEl.load();
     }
+    // Without this a teardown during startup would leave the card marked as
+    // loading, and _updatePlaybackState would never start it again.
+    this._loading = false;
     this._streamUrl = undefined;
   }
 
   private async _startStream(): Promise<void> {
     if (!this.hass || !this._config?.entity) return;
 
-    this._streamSessionId++;
-    const sessionId = this._streamSessionId;
-
+    // Tear down first: _destroyHls bumps the session id, so the id taken
+    // afterwards is the only one allowed to attach a player.
     this._destroyHls();
+    const sessionId = ++this._streamSessionId;
+
     this._loading = true;
     this._error = undefined;
     this.requestUpdate();
@@ -184,6 +287,16 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
       const stateObj = this.hass.states[this._config.entity];
       if (!stateObj) {
         throw new Error(`Entity not found: ${this._config.entity}`);
+      }
+
+      if (this._isUnavailable(stateObj)) {
+        // entry_id is gone with the rest of the attributes. Bail out quietly,
+        // the availability watcher restarts us when the camera is back.
+        console.debug(`skyline-webcams-card: ${this._config.entity} is unavailable, not starting a stream`);
+        this._unavailable = true;
+        this._loading = false;
+        this.requestUpdate();
+        return;
       }
 
       const entryId = stateObj.attributes.entry_id;
@@ -249,6 +362,7 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         console.debug('skyline-webcams-card: manifest parsed, playing video');
+        this._restartAttempts = 0;
         const playPromise = video.play();
         if (playPromise !== undefined) {
           playPromise.catch((err) => {
@@ -276,7 +390,7 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
             case Hls.ErrorTypes.NETWORK_ERROR:
               console.debug('skyline-webcams-card: fatal network error, attempting to recover');
               // Try to start a fresh stream from HA since the stream worker might have crashed/expired
-              this._startStream();
+              this._scheduleRestart();
               break;
             case Hls.ErrorTypes.MEDIA_ERROR:
               console.debug('skyline-webcams-card: fatal media error, attempting recovery');
@@ -284,7 +398,7 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
               break;
             default:
               console.error('skyline-webcams-card: unrecoverable fatal Hls error, restarting stream');
-              this._startStream();
+              this._scheduleRestart();
               break;
           }
         }
@@ -309,7 +423,7 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
 
       video.onerror = () => {
         console.warn('skyline-webcams-card: native video error, reloading stream');
-        this._startStream();
+        this._scheduleRestart();
       };
     } else {
       this._error = 'HLS streaming is not supported by your browser.';
@@ -317,7 +431,40 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
     }
   }
 
+  /**
+   * Retries the stream after a growing delay.
+   *
+   * A stream that keeps failing used to be retried without any pause, which
+   * hammered the proxy and, through it, skylinewebcams.com.
+   */
+  private _scheduleRestart(): void {
+    if (this._restartTimer !== undefined) return;
+
+    const delay = Math.min(RESTART_BASE_DELAY_MS * 2 ** this._restartAttempts, RESTART_MAX_DELAY_MS);
+    this._restartAttempts++;
+
+    this._restartTimer = window.setTimeout(() => {
+      this._restartTimer = undefined;
+      // The same gate every other start passes through. A card that is hidden,
+      // scrolled out of view or whose camera is unavailable must not open a
+      // stream nobody is watching - whatever brings it back (visibility,
+      // intersection, the entity returning) starts it then.
+      if (this._unavailable || document.visibilityState !== 'visible' || !this._isIntersecting) {
+        return;
+      }
+      this._startStream();
+    }, delay);
+  }
+
+  private _clearRestartTimer(): void {
+    if (this._restartTimer !== undefined) {
+      clearTimeout(this._restartTimer);
+      this._restartTimer = undefined;
+    }
+  }
+
   private _handleRetry(): void {
+    this._restartAttempts = 0;
     this._error = undefined;
     this._startStream();
   }
@@ -367,19 +514,30 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
     if (!this.hass || !this._config) return html``;
 
     const entityId = this._config.entity;
+
+    if (!entityId) {
+      return html`
+        <ha-card>
+          <div class="card-content no-entity-hint">${localize(this.hass, 'card.no_entity')}</div>
+        </ha-card>
+      `;
+    }
+
     const stateObj = this.hass.states[entityId];
 
     if (!stateObj) {
       const errorTitle = this._config.title || localize(this.hass, 'card.default_title');
       return html`
         <ha-card>
-          ${errorTitle
-            ? html`
-                <h1 class="card-header" @click=${this._handleMoreInfo} title="Open entity">
-                  <div class="name" dir="ltr">${errorTitle}</div>
-                </h1>
-              `
-            : ''}
+          ${
+            errorTitle
+              ? html`
+                  <h1 class="card-header" @click=${this._handleMoreInfo} title="Open entity">
+                    <div class="name" dir="ltr">${errorTitle}</div>
+                  </h1>
+                `
+              : ''
+          }
           <div class="card-content error-container">
             ${localize(this.hass, 'card.entity_not_found', { entity: entityId })}
           </div>
@@ -399,30 +557,48 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
 
     return html`
       <ha-card>
-        ${this._config.title
-          ? html`
-              <h1 class="card-header" @click=${this._handleMoreInfo} title="Open entity">
-                <div class="name" dir="ltr">${title}</div>
-              </h1>
-            `
-          : ''}
+        ${
+          this._config.title
+            ? html`
+                <h1 class="card-header" @click=${this._handleMoreInfo} title="Open entity">
+                  <div class="name" dir="ltr">${title}</div>
+                </h1>
+              `
+            : ''
+        }
         <div class="card-content">
           <div class="video-container" style="aspect-ratio: ${this._config.aspect_ratio || '16/9'};">
-            ${this._error
-              ? html`
-                  <div class="overlay error-overlay">
-                    <p class="error-msg">${this._error}</p>
-                    <button class="retry-btn" @click=${this._handleRetry}>${localize(this.hass, 'card.retry')}</button>
-                  </div>
-                `
-              : ''}
-            ${this._loading
-              ? html`
-                  <div class="overlay loading-overlay">
-                    <div class="spinner"></div>
-                  </div>
-                `
-              : ''}
+            ${
+              this._unavailable
+                ? html`
+                    <div class="overlay unavailable-overlay">
+                      <ha-icon icon="mdi:video-off"></ha-icon>
+                      <p class="unavailable-msg">${localize(this.hass, 'card.entity_unavailable')}</p>
+                    </div>
+                  `
+                : ''
+            }
+            ${
+              this._error
+                ? html`
+                    <div class="overlay error-overlay">
+                      <p class="error-msg">${this._error}</p>
+                      <button class="retry-btn" @click=${this._handleRetry}>
+                        ${localize(this.hass, 'card.retry')}
+                      </button>
+                    </div>
+                  `
+                : ''
+            }
+            ${
+              this._loading
+                ? html`
+                    <div class="overlay loading-overlay">
+                      <div class="spinner"></div>
+                    </div>
+                  `
+                : ''
+            }
 
             <video
               playsinline
@@ -434,74 +610,88 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
               @pause=${() => this.requestUpdate()}
             ></video>
 
-            ${this._config.show_video_controls !== false
-              ? html`
-                  <div class="video-controls" @click=${(e: Event) => e.stopPropagation()}>
-                    <button
-                      class="control-btn"
-                      @click=${this._togglePlay}
-                      aria-label="${this._videoEl?.paused
-                        ? localize(this.hass, 'card.play')
-                        : localize(this.hass, 'card.pause')}"
-                      title="${this._videoEl?.paused
-                        ? localize(this.hass, 'card.play')
-                        : localize(this.hass, 'card.pause')}"
-                    >
-                      <ha-icon icon="${this._videoEl?.paused ? 'mdi:play' : 'mdi:pause'}"></ha-icon>
-                    </button>
-                    <div class="spacer"></div>
-                    ${isPiPSupported()
-                      ? html`
-                          <button
-                            class="control-btn"
-                            @click=${this._togglePiP}
-                            aria-label="${localize(this.hass, 'card.picture_in_picture')}"
-                            title="${localize(this.hass, 'card.picture_in_picture')}"
-                          >
-                            <ha-icon icon="mdi:picture-in-picture-bottom-right"></ha-icon>
-                          </button>
-                        `
-                      : ''}
-                    <button
-                      class="control-btn"
-                      @click=${this._toggleFullscreen}
-                      aria-label="${document.fullscreenElement
-                        ? localize(this.hass, 'card.exit_fullscreen')
-                        : localize(this.hass, 'card.fullscreen')}"
-                      title="${document.fullscreenElement
-                        ? localize(this.hass, 'card.exit_fullscreen')
-                        : localize(this.hass, 'card.fullscreen')}"
-                    >
-                      <ha-icon
-                        icon="${document.fullscreenElement ? 'mdi:fullscreen-exit' : 'mdi:fullscreen'}"
-                      ></ha-icon>
-                    </button>
-                  </div>
-                `
-              : ''}
+            ${
+              this._config.show_video_controls !== false
+                ? html`
+                    <div class="video-controls" @click=${(e: Event) => e.stopPropagation()}>
+                      <button
+                        class="control-btn"
+                        @click=${this._togglePlay}
+                        aria-label="${
+                          this._videoEl?.paused ? localize(this.hass, 'card.play') : localize(this.hass, 'card.pause')
+                        }"
+                        title="${
+                          this._videoEl?.paused ? localize(this.hass, 'card.play') : localize(this.hass, 'card.pause')
+                        }"
+                      >
+                        <ha-icon icon="${this._videoEl?.paused ? 'mdi:play' : 'mdi:pause'}"></ha-icon>
+                      </button>
+                      <div class="spacer"></div>
+                      ${
+                        isPiPSupported()
+                          ? html`
+                              <button
+                                class="control-btn"
+                                @click=${this._togglePiP}
+                                aria-label="${localize(this.hass, 'card.picture_in_picture')}"
+                                title="${localize(this.hass, 'card.picture_in_picture')}"
+                              >
+                                <ha-icon icon="mdi:picture-in-picture-bottom-right"></ha-icon>
+                              </button>
+                            `
+                          : ''
+                      }
+                      <button
+                        class="control-btn"
+                        @click=${this._toggleFullscreen}
+                        aria-label="${
+                          document.fullscreenElement
+                            ? localize(this.hass, 'card.exit_fullscreen')
+                            : localize(this.hass, 'card.fullscreen')
+                        }"
+                        title="${
+                          document.fullscreenElement
+                            ? localize(this.hass, 'card.exit_fullscreen')
+                            : localize(this.hass, 'card.fullscreen')
+                        }"
+                      >
+                        <ha-icon
+                          icon="${document.fullscreenElement ? 'mdi:fullscreen-exit' : 'mdi:fullscreen'}"
+                        ></ha-icon>
+                      </button>
+                    </div>
+                  `
+                : ''
+            }
           </div>
 
           <div class="webcam-info">
-            ${!this._config.title && title
-              ? html`<h2 class="webcam-title" @click=${this._handleMoreInfo} title="Open entity">${title}</h2>`
-              : ''}
-            ${locationText
-              ? html`<p class="webcam-location"><ha-icon icon="mdi:map-marker"></ha-icon> ${locationText}</p>`
-              : ''}
+            ${
+              !this._config.title && title
+                ? html`<h2 class="webcam-title" @click=${this._handleMoreInfo} title="Open entity">${title}</h2>`
+                : ''
+            }
+            ${
+              locationText
+                ? html`<p class="webcam-location"><ha-icon icon="mdi:map-marker"></ha-icon> ${locationText}</p>`
+                : ''
+            }
             ${description && description !== title ? html`<p class="webcam-description">${description}</p>` : ''}
-            ${this._config.show_link && stateObj.attributes.source
-              ? html`
-                  <a
-                    href="${stateObj.attributes.source}"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="webcam-source-link"
-                    @click=${(e: Event) => e.stopPropagation()}
-                  >
-                    <ha-icon icon="mdi:open-in-new"></ha-icon> ${localize(this.hass, 'card.view_on_skylinewebcams')}
-                  </a>
-                `
-              : ''}
+            ${
+              this._config.show_link && stateObj.attributes.source
+                ? html`
+                    <a
+                      href="${stateObj.attributes.source}"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="webcam-source-link"
+                      @click=${(e: Event) => e.stopPropagation()}
+                    >
+                      <ha-icon icon="mdi:open-in-new"></ha-icon> ${localize(this.hass, 'card.view_on_skylinewebcams')}
+                    </a>
+                  `
+                : ''
+            }
           </div>
         </div>
       </ha-card>
@@ -519,11 +709,13 @@ if (!customElements.get(ELEMENT_NAME)) {
 
 // Register custom card in Home Assistant picker
 window.customCards = window.customCards || [];
-window.customCards.push({
-  type: ELEMENT_NAME,
-  name: 'Skyline Webcams Card',
-  description:
-    'A dedicated Lovelace card for Skyline Webcams supporting robust HLS streaming and automatic reconnection.',
-  preview: true,
-  documentationURL: 'https://github.com/timmaurice/skyline-webcams',
-});
+if (!window.customCards.some((card) => card.type === ELEMENT_NAME)) {
+  window.customCards.push({
+    type: ELEMENT_NAME,
+    name: 'Skyline Webcams Card',
+    description:
+      'A dedicated Lovelace card for Skyline Webcams supporting robust HLS streaming and automatic reconnection.',
+    preview: true,
+    documentationURL: 'https://github.com/timmaurice/skyline-webcams',
+  });
+}

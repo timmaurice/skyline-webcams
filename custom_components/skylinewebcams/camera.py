@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import logging
 import asyncio
+import hmac
 import re
+import secrets
+from hashlib import sha256
+from urllib.parse import urlparse
 import aiohttp
 from bs4 import BeautifulSoup
 from aiohttp import web
@@ -20,13 +24,45 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.network import get_url
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
-import aiohttp
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
 
 from .const import DOMAIN
+from .helpers import async_migrated_unique_id
 
 _LOGGER = logging.getLogger(__name__)
+
+ALLOWED_STREAM_HOST = "skylinewebcams.com"
+
+# Backoff for the scraper, so a camera whose page is down does not get scraped
+# again on every single proxy request. While the backoff runs, the cached URL is
+# handed back unchanged: it may still play, and re-scraping a page that just
+# failed would not have produced a better one.
+FETCH_BACKOFF_BASE_SECONDS = 5
+FETCH_BACKOFF_MAX_SECONDS = 300
+# 5s * 2**6 = 320s, already past the cap above. Counting failures beyond this
+# only builds a bigger power for a value the cap flattens anyway.
+MAX_BACKOFF_FAILURES = 7
+
+
+def is_allowed_stream_url(url: str | None) -> bool:
+    """Check that a URL points at SkylineWebcams over HTTP(S).
+
+    The proxy fetches this URL from inside the Home Assistant network, so
+    anything that is not the upstream site must be rejected before a request
+    is made.
+    """
+    if not url:
+        return False
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False
+    if parsed.scheme not in ("http", "https"):
+        return False
+    host = (parsed.hostname or "").lower()
+    return host == ALLOWED_STREAM_HOST or host.endswith("." + ALLOWED_STREAM_HOST)
+
 
 PLATFORM_SCHEMA = cv.PLATFORM_SCHEMA.extend(
     {
@@ -56,8 +92,10 @@ async def async_setup_platform(
     url = config[CONF_URL]
     name = config.get(CONF_NAME, "Skyline Webcam")
 
-    # Use URL as unique_id for YAML as well
-    unique_id = url
+    # The same normalised id the config entries use, so a camera configured in
+    # YAML and the same camera added through the UI are recognised as one. The
+    # entity keeps its registry entry: the id is migrated, not replaced.
+    unique_id = async_migrated_unique_id(hass, url, url)
     # For YAML, we use a hash of the URL as the entry_id for safe proxy routing
     entry_id = hashlib.md5(url.encode()).hexdigest()
 
@@ -103,12 +141,27 @@ class SkylineWebcamsHlsProxyView(HomeAssistantView):
         if not camera:
             return web.Response(status=404, text="Camera not found")
 
-        target_url = request.query.get("url")
+        # Segment requests carry a token that this proxy issued when it
+        # rewrote the playlist. A caller supplied URL is never fetched, so the
+        # endpoint cannot be used to reach arbitrary hosts.
+        segment_token = request.query.get("seg")
 
-        if not target_url:
+        if segment_token:
+            target_url = camera.resolve_segment_url(segment_token)
+            if not target_url:
+                return web.Response(status=404, text="Unknown stream segment")
+        else:
             target_url = await camera.get_fresh_stream_url()
             if not target_url:
                 return web.Response(status=502, text="Failed to fetch stream URL")
+
+        if not is_allowed_stream_url(target_url):
+            _LOGGER.warning(
+                "[%s] Refusing to proxy a URL outside %s",
+                camera.name,
+                ALLOWED_STREAM_HOST,
+            )
+            return web.Response(status=403, text="Stream host not allowed")
 
         is_ts_request = request.path.endswith(".ts") or (
             target_url and ".ts" in target_url
@@ -123,8 +176,8 @@ class SkylineWebcamsHlsProxyView(HomeAssistantView):
                 )
                 return web.Response(
                     body=body_bytes,
-                    content_type=content_type,
                     headers={
+                        "Content-Type": content_type,
                         "Access-Control-Allow-Origin": "*",
                         "Cache-Control": "public, max-age=3600",
                     },
@@ -150,12 +203,23 @@ class SkylineWebcamsHlsProxyView(HomeAssistantView):
 
                     # Check if token is expired (empty playlist or copyright violation)
                     if "copyright_violation" in text or ".ts" not in text:
-                        # Token is invalid, force refresh
-                        camera._last_update = 0
-                        target_url = await camera.get_fresh_stream_url()
+                        # Token is invalid, force refresh. This bypasses the
+                        # backoff as well as the cache: the URL we hold is
+                        # provably dead, so serving it again is worse than
+                        # scraping once more.
+                        target_url = await camera.get_fresh_stream_url(force=True)
                         if not target_url:
                             return web.Response(
                                 status=502, text="Failed to fetch fresh stream URL"
+                            )
+                        if not is_allowed_stream_url(target_url):
+                            _LOGGER.warning(
+                                "[%s] Refusing to proxy a URL outside %s",
+                                camera.name,
+                                ALLOWED_STREAM_HOST,
+                            )
+                            return web.Response(
+                                status=403, text="Stream host not allowed"
                             )
 
                         # Retry fetch
@@ -169,7 +233,7 @@ class SkylineWebcamsHlsProxyView(HomeAssistantView):
                                 )
                             text = await retry_resp.text()
                     rewritten_lines = []
-                    from urllib.parse import urljoin, quote, urlparse
+                    from urllib.parse import urljoin
 
                     parsed_target = urlparse(target_url)
                     for line in text.splitlines():
@@ -179,9 +243,26 @@ class SkylineWebcamsHlsProxyView(HomeAssistantView):
                             parsed_chunk = urlparse(chunk_url)
                             if not parsed_chunk.query and parsed_target.query:
                                 chunk_url = f"{chunk_url}?{parsed_target.query}"
-                            encoded_url = quote(chunk_url, safe="")
+                            if not is_allowed_stream_url(chunk_url):
+                                _LOGGER.warning(
+                                    "[%s] Dropping playlist entry outside %s",
+                                    camera.name,
+                                    ALLOWED_STREAM_HOST,
+                                )
+                                # Drop the tags that belong to the segment too,
+                                # so no dangling #EXTINF is left behind.
+                                while rewritten_lines and (
+                                    not rewritten_lines[-1]
+                                    or rewritten_lines[-1].startswith("#EXTINF")
+                                    or rewritten_lines[-1].startswith(
+                                        "#EXT-X-BYTERANGE"
+                                    )
+                                ):
+                                    rewritten_lines.pop()
+                                continue
+                            token = camera.register_segment_url(chunk_url)
                             rewritten_lines.append(
-                                f"/api/skylinewebcams_proxy/{entry_id}.ts?url={encoded_url}"
+                                f"/api/skylinewebcams_proxy/{entry_id}.ts?seg={token}"
                             )
                         else:
                             rewritten_lines.append(line)
@@ -197,8 +278,8 @@ class SkylineWebcamsHlsProxyView(HomeAssistantView):
                         camera.put_cached_ts(target_url, content_type, body_bytes)
                         return web.Response(
                             body=body_bytes,
-                            content_type=content_type,
                             headers={
+                                "Content-Type": content_type,
                                 "Access-Control-Allow-Origin": "*",
                                 "Cache-Control": "public, max-age=3600",
                             },
@@ -223,8 +304,9 @@ class SkylineWebcamsHlsProxyView(HomeAssistantView):
 
                     await response.write_eof()
                     return response
-        except Exception as e:
-            return web.Response(status=500, text=str(e))
+        except Exception:
+            _LOGGER.exception("[%s] Error while proxying the stream", camera.name)
+            return web.Response(status=502, text="Proxy error")
 
 
 class SkylineWebcamsCamera(Camera, RestoreEntity):
@@ -250,17 +332,65 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
         self._attr_name = name
         self._attr_unique_id = unique_id
         self._stream_url = None
-        self._last_update = 0
+        # -inf, not 0: the clock behind _is_cached is asyncio's monotonic one,
+        # whose origin is the machine's boot. On a freshly booted host 0 sits
+        # inside the 120-second window, so "never fetched" would read as "just
+        # fetched" - which is exactly how a CI runner differs from a laptop that
+        # has been up for days.
+        self._last_update = float("-inf")
+        # Bumped whenever a scrape replaces the URL, and whenever one runs at
+        # all. Together they tell a caller waiting on the lock whether what it
+        # would ask for has already happened.
+        self._stream_version = 0
+        self._fetch_attempts = 0
+        self._fetch_failures = 0
+        self._retry_not_before = 0.0
+        # One scrape at a time per camera. Startup asks for the stream URL from
+        # several directions at once, and without this each of them opened its
+        # own request to the same page.
+        self._fetch_lock = asyncio.Lock()
+        # Whether the current run of failures has already been logged at ERROR.
+        # Repeating the same message every 30 seconds for a site that is down
+        # buries everything else in the log.
+        self._failure_logged = False
         self._additional_attributes = {"source": self._url}
         self._attr_available = True
         self._session = None
         self._ts_cache = OrderedDict()
         self._ts_cache_capacity = 15
+        # Segment URLs the proxy itself handed out, keyed by an opaque token.
+        # The proxy never fetches a URL that is not in here.
+        self._segment_urls: OrderedDict[str, str] = OrderedDict()
+        self._segment_capacity = 256
+        self._segment_secret = secrets.token_bytes(32)
 
     def get_session(self):
         if not self._session:
             self._session = async_create_clientsession(self.hass)
         return self._session
+
+    def register_segment_url(self, url: str) -> str:
+        """Register an upstream segment URL and return the token for it.
+
+        The token is derived from the URL with a per-camera secret, so the same
+        segment keeps the same token across playlist refreshes and the table
+        does not grow on every reload.
+        """
+        token = hmac.new(self._segment_secret, url.encode(), sha256).hexdigest()[:32]
+        if token in self._segment_urls:
+            self._segment_urls.move_to_end(token)
+        else:
+            self._segment_urls[token] = url
+            if len(self._segment_urls) > self._segment_capacity:
+                self._segment_urls.popitem(last=False)
+        return token
+
+    def resolve_segment_url(self, token: str) -> str | None:
+        """Return the upstream URL for a token the proxy issued earlier."""
+        url = self._segment_urls.get(token)
+        if url is not None:
+            self._segment_urls.move_to_end(token)
+        return url
 
     def get_cached_ts(self, url: str) -> tuple[str, bytes] | None:
         """Get cached TS chunk."""
@@ -287,7 +417,9 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
                 if attr in old_state.attributes:
                     self._additional_attributes[attr] = old_state.attributes[attr]
 
-        self.hass.async_create_task(self.get_fresh_stream_url())
+        # No extra fetch task here: the entity is added with
+        # update_before_add=True and the state write below runs async_update,
+        # so a third request would only race the other two.
         self.async_schedule_update_ha_state(True)
 
     async def async_will_remove_from_hass(self) -> None:
@@ -376,17 +508,89 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
         )
         return proxy_url
 
-    async def get_fresh_stream_url(self) -> str | None:
-        """Get a fresh URL, caching it for 2 minutes to avoid rate limits."""
-        now = asyncio.get_event_loop().time()
+    async def get_fresh_stream_url(self, force: bool = False) -> str | None:
+        """Get a fresh URL, caching it for 2 minutes to avoid rate limits.
 
-        if self._stream_url and (now - self._last_update < 120):
+        `force` skips both the cache and the backoff. The caller uses it when it
+        has proof the cached URL is dead - handing that same URL back would only
+        buy another failed fetch.
+
+        A forced caller is still coalesced with everyone else waiting on the
+        lock: what it must not be served is the entry it has just proved dead,
+        which is the one it saw on the way in. Anything that happened after
+        that - a newer URL, or a fetch attempt that came back empty - answers
+        its question as well as its own request would have, so the site is
+        asked once no matter how many viewers a token expires under.
+        """
+        # Taken before queueing on the lock, so "after" means after this
+        # caller asked, not after it got to the front of the queue.
+        seen = (self._stream_version, self._fetch_attempts)
+
+        if self._is_cached(force):
             return self._stream_url
 
-        url = await self._fetch_stream_url()
+        async with self._fetch_lock:
+            # Whoever held the lock may have just fetched what we came for.
+            if self._is_cached(force) or self._has_moved_on(seen):
+                return self._stream_url
+            return await self._fetch_and_cache(force)
+
+    def _is_cached(self, force: bool) -> bool:
+        """Whether the URL in hand can be served without asking the site."""
+        if force:
+            return False
+        now = asyncio.get_event_loop().time()
+        return bool(self._stream_url) and (now - self._last_update < 120)
+
+    def _has_moved_on(self, seen: tuple[int, int]) -> bool:
+        """Whether a fetch has run since the caller looked at the cache."""
+        return (self._stream_version, self._fetch_attempts) != seen
+
+    async def _fetch_and_cache(self, force: bool) -> str | None:
+        """Scrape a fresh URL, or serve the cached one while backing off."""
+        now = asyncio.get_event_loop().time()
+
+        if not force and now < self._retry_not_before:
+            _LOGGER.debug(
+                "[%s] Skipping stream URL fetch, backing off for another %.0fs",
+                self._attr_name,
+                self._retry_not_before - now,
+            )
+            # The cached URL, same as the failure path below: it may be stale,
+            # but handing back None where a fetch would have returned the old
+            # one only makes the backoff window worse than the failure it is
+            # protecting against.
+            return self._stream_url
+
+        try:
+            url = await self._fetch_stream_url()
+        finally:
+            # Counted even when the scrape raised: the callers behind us asked
+            # for a fetch, and a fetch is what happened.
+            self._fetch_attempts += 1
+
         if url:
             self._stream_url = url
+            self._stream_version += 1
             self._last_update = asyncio.get_event_loop().time()
+            self._fetch_failures = 0
+            self._retry_not_before = 0.0
+        else:
+            # Stop counting once the delay is capped: a camera whose page
+            # stays gone for weeks would otherwise raise 2 to an ever growing
+            # power for a value that is clamped to five minutes anyway.
+            self._fetch_failures = min(self._fetch_failures + 1, MAX_BACKOFF_FAILURES)
+            delay = min(
+                FETCH_BACKOFF_BASE_SECONDS * 2 ** (self._fetch_failures - 1),
+                FETCH_BACKOFF_MAX_SECONDS,
+            )
+            self._retry_not_before = asyncio.get_event_loop().time() + delay
+            _LOGGER.debug(
+                "[%s] Stream URL fetch failed %d time(s), next attempt in %ds",
+                self._attr_name,
+                self._fetch_failures,
+                delay,
+            )
 
         return self._stream_url
 
@@ -406,12 +610,22 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
             async with asyncio.timeout(20):
                 async with session.get(self._url, headers=headers) as response:
                     if response.status != 200:
+                        self._log_fetch_failure(
+                            "[%s] Webcam page answered %s",
+                            self._attr_name,
+                            response.status,
+                        )
                         self._attr_available = False
+                        # Same as the error paths below: an entity that has
+                        # gone unavailable is only unavailable once the state
+                        # is written.
+                        if self.entity_id:
+                            self.async_write_ha_state()
                         return None
 
                     self._attr_available = True
                     text = await response.text()
-                    soup = BeautifulSoup(text, "html.parser")
+                    soup = await self._parse_html(text)
 
                     # Extract metadata
                     if h2 := soup.find("h2"):
@@ -459,15 +673,63 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
                     if "livee.m3u8" in stream_path:
                         stream_path = stream_path.replace("livee.m3u8", "live.m3u8")
 
+                    if self._failure_logged:
+                        _LOGGER.info(
+                            "[%s] Stream URL is reachable again", self._attr_name
+                        )
+                        self._failure_logged = False
+
                     if self.entity_id:
                         self.async_write_ha_state()
                     return f"https://hd-auth.skylinewebcams.com/{stream_path}"
 
         except (aiohttp.ClientError, asyncio.TimeoutError) as err:
-            _LOGGER.error(
-                "[%s] Network error while fetching stream URL: %s", self._attr_name, err
+            return self._handle_fetch_error(
+                "[%s] Network error while fetching stream URL: %s", err
             )
-            self._attr_available = False
-            if self.entity_id:
-                self.async_write_ha_state()
-            return None
+        except Exception as err:  # noqa: BLE001 - see the docstring below
+            # Anything else is still an outage as far as this camera is
+            # concerned, and it has to arrive at the same place: a failure that
+            # escaped left the backoff unarmed, so the next proxy request
+            # scraped again immediately and Home Assistant logged at ERROR
+            # every cycle - the log flooding this was meant to stop, reached
+            # through a different exception class. The parser runs inside this
+            # try as well, and bs4 does not raise ClientError.
+            return self._handle_fetch_error(
+                "[%s] Unexpected error while fetching stream URL: %s", err
+            )
+
+    def _handle_fetch_error(self, message: str, err: Exception) -> None:
+        """Log a failed scrape once, mark the camera unavailable, give up.
+
+        Returning None puts the caller on the backoff path, which is what keeps
+        a camera whose page is broken from being scraped on every request.
+        """
+        self._log_fetch_failure(message, self._attr_name, err)
+        self._attr_available = False
+        if self.entity_id:
+            self.async_write_ha_state()
+        return None
+
+    async def _parse_html(self, text: str) -> BeautifulSoup:
+        """Parse a webcam page off the event loop.
+
+        The pages run to hundreds of kilobytes and html.parser is slow enough
+        that parsing them inline stalls the loop for every camera in turn.
+        """
+        return await self.hass.async_add_executor_job(
+            BeautifulSoup, text, "html.parser"
+        )
+
+    def _log_fetch_failure(self, message: str, *args) -> None:
+        """Log the first failure of a run at ERROR, the rest at DEBUG.
+
+        A site that stays down would otherwise write an ERROR line per camera
+        every refresh interval, which is what buried the log during the QA run.
+        Recovery is logged once at INFO.
+        """
+        if self._failure_logged:
+            _LOGGER.debug(message, *args)
+            return
+        _LOGGER.error(message, *args)
+        self._failure_logged = True

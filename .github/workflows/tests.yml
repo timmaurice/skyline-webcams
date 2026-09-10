@@ -37,7 +37,7 @@ jobs:
       - name: Run tests (offline)
         run: |
           # Run tests offline without color codes and save output
-          PYTHONPATH=. pytest --color=no custom_components/skylinewebcams/tests > pytest_output.txt 2>&1 || test_exit_code=$?
+          PYTHONPATH=. pytest --color=no tests > pytest_output.txt 2>&1 || test_exit_code=$?
           cat pytest_output.txt
 
           # Extract summary line (e.g. "5 passed in 0.20s")

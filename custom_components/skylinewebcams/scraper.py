@@ -12,10 +12,15 @@ _LOGGER = logging.getLogger(__name__)
 class SkylineWebcamsScraper:
     """Class to scrape SkylineWebcams pages."""
 
-    def __init__(self, session, language="en"):
-        """Initialize the scraper."""
+    def __init__(self, session, language="en", hass=None):
+        """Initialize the scraper.
+
+        `hass` is optional only so the scraper stays usable without it; when it
+        is there the HTML is parsed in an executor instead of on the loop.
+        """
         self.session = session
         self.language = language
+        self.hass = hass
         self.base_url = "https://www.skylinewebcams.com"
 
     async def _get_soup(self, url: str) -> BeautifulSoup | None:
@@ -29,10 +34,22 @@ class SkylineWebcamsScraper:
                     _LOGGER.error("Failed to fetch %s: %s", url, response.status)
                     return None
                 text = await response.text()
-                return BeautifulSoup(text, "html.parser")
+                return await self._parse(text)
         except Exception as err:
             _LOGGER.error("Error fetching %s: %s", url, err)
             return None
+
+    async def _parse(self, text: str) -> BeautifulSoup:
+        """Parse HTML off the event loop where possible.
+
+        html.parser on a directory page of a few hundred kilobytes is slow
+        enough to stall the loop while a config flow is open.
+        """
+        if self.hass is None:
+            return BeautifulSoup(text, "html.parser")
+        return await self.hass.async_add_executor_job(
+            BeautifulSoup, text, "html.parser"
+        )
 
     async def get_structure(self) -> dict:
         """Get the full structure of continents and countries from the homepage."""
