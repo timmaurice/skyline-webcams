@@ -16,7 +16,7 @@ View [SkylineWebcams](https://www.skylinewebcams.com/) streams as native camera 
 - **Webcam Discovery**: Browse and find webcams by continent, country, and location.
 - **Dynamic Stream Extraction**: Automatically finds the current live stream URL.
 - **Token Management**: Handles authentication tokens for streams.
-- **Native Streaming**: Uses Home Assistant's `stream` component for efficient playback and snapshot generation.
+- **Two Playback Paths**: The bundled Lovelace card plays the stream itself through the integration's own HLS proxy; everything else in Home Assistant (`more-info`, snapshots, `camera.record`) goes through the `stream` and `ffmpeg` components, which are handed the same proxy URL.
 
 ## Installation
 
@@ -41,9 +41,9 @@ For a quick trial or development, a Docker environment is provided.
 
 1.  Clone this repository.
 2.  Run `docker compose up`.
-3.  Access Home Assistant at [http://localhost:8123](http://localhost:8123).
+3.  Access Home Assistant at [http://localhost:8131](http://localhost:8131) (the compose file maps container port 8123 to 8131).
 
-The Docker environment comes **pre-configured** with a live webcam (Neuschwanstein Castle) so you can see it in action immediately.
+The Docker environment comes **pre-configured** with five live webcams (Neuschwanstein Castle, Tsavo East, Venice, Rome and Lindenfels) and a dashboard that shows both the standard camera card and the bundled custom card, so you can see it in action immediately.
 
 ## Configuration
 
@@ -100,6 +100,8 @@ camera:
 |          |                        | `region`      | Bavaria                                                                        |
 |          |                        | `place`       | Schwangau                                                                      |
 |          |                        | `source`      | `https://www.skylinewebcams.com/..`                                            |
+|          |                        | `poster`      | `https://static.skylinewebcams.com/..jpg` (still image from the webcam page)   |
+|          |                        | `entry_id`    | `1a2b3c..` (used by the bundled card to address the HLS proxy)                 |
 
 ### Lovelace Card
 
@@ -111,7 +113,7 @@ This integration includes a dedicated custom Lovelace card: `custom:skyline-webc
 
 - **Overlay Controls**: Interactive control bar (Play/Pause, Picture-in-Picture, Fullscreen) that fades in smoothly on hover.
 - **Viewport Pausing (IntersectionObserver)**: Automatically pauses playback and detaches Hls.js when the card is scrolled out of the viewport or the tab is hidden, optimizing network usage and CPU.
-- **Backend LRU Chunk Cache**: The backend proxy uses a thread-safe LRU caching mechanism for `.ts` video chunks, speeding up card startup and reducing upstream server requests when multiple views are active.
+- **Backend LRU Chunk Cache**: The backend proxy keeps the last few `.ts` video chunks in an LRU cache on the event loop, speeding up card startup and reducing upstream requests when several views play the same camera.
 
 #### Card Configuration
 
