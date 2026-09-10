@@ -1,8 +1,11 @@
 """What ends up in the HACS zip, and what the manifests declare.
 
-The release workflow zips the integration folder with two exclusions, so debug
-notes, a 2.4 MB screenshot and the test suite were downloaded by every HACS
-user. These check the folder and the exclusion list together.
+The release workflow zips the integration folder with a list of exclusions, so
+debug notes, a 2.4 MB screenshot and the test suite were downloaded by every
+HACS user. The exclusion rules are checked against a tree written out here
+rather than against the repository: the debug notes and the tests no longer
+live under the integration at all, so a check that only walks the real folder
+has nothing left to exclude and passes whatever the rules say.
 """
 
 import json
@@ -43,18 +46,74 @@ def matches(pattern: str, path: str) -> bool:
     return re.fullmatch(regex, path) is not None
 
 
-def packaged_files() -> list[str]:
-    """Paths, relative to the integration folder, that survive the exclusions."""
+def surviving(paths: list[str]) -> list[str]:
+    """The paths the release workflow's exclusions would leave in the zip."""
     excludes = zip_excludes()
-    files = []
-    for path in sorted(COMPONENT.rglob("*")):
-        if not path.is_file():
-            continue
-        relative = path.relative_to(COMPONENT).as_posix()
-        if any(matches(pattern, relative) for pattern in excludes):
-            continue
-        files.append(relative)
-    return files
+    return [
+        path
+        for path in paths
+        if not any(matches(pattern, path) for pattern in excludes)
+    ]
+
+
+def component_files() -> list[str]:
+    """Paths, relative to the integration folder, as they are on disk."""
+    return sorted(
+        path.relative_to(COMPONENT).as_posix()
+        for path in COMPONENT.rglob("*")
+        if path.is_file()
+    )
+
+
+# One entry per thing the exclusion list is there for, plus the files that have
+# to survive it. Written out here so every rule is exercised on every run,
+# whatever the integration folder happens to contain.
+RUNTIME_TREE = [
+    "__init__.py",
+    "camera.py",
+    "config_flow.py",
+    "helpers.py",
+    "manifest.json",
+    "skyline-webcams-card.js",
+    "translations/de.json",
+    "translations/en.json",
+]
+
+EXCLUDED_TREE = [
+    # Test suite, at the top level and nested.
+    "tests/__init__.py",
+    "tests/test_camera.py",
+    "tests/helpers/fake_site.py",
+    # Byte code, which is what a developer's checkout is full of.
+    "__pycache__/camera.cpython-312.pyc",
+    "translations/__pycache__/de.cpython-312.pyc",
+    # Documentation, and the 2.4 MB screenshot that went with it.
+    "README.md",
+    "docs/DEBUG_NOTES.md",
+    "docs/debug.png",
+    "debug.png",
+    # Brand assets belong to the HA brands repository.
+    "brand/icon.png",
+    "brand/logo.svg",
+    # Finder droppings, at any depth.
+    ".DS_Store",
+    "translations/.DS_Store",
+]
+
+
+def test_the_exclusion_rules_drop_everything_they_are_meant_to():
+    assert surviving(EXCLUDED_TREE) == []
+
+
+def test_the_exclusion_rules_keep_everything_a_user_needs():
+    assert surviving(RUNTIME_TREE) == RUNTIME_TREE
+
+
+def test_a_mixed_tree_is_split_the_way_it_should_be():
+    """Both halves at once: the order files are walked in must not matter."""
+    mixed = sorted(RUNTIME_TREE + EXCLUDED_TREE)
+
+    assert surviving(mixed) == sorted(RUNTIME_TREE)
 
 
 def test_no_debug_artefacts_in_the_integration_folder():
@@ -68,22 +127,20 @@ def test_no_debug_artefacts_in_the_integration_folder():
     assert stray == []
 
 
-def test_the_zip_would_not_ship_tests_or_docs():
-    packaged = packaged_files()
+def test_the_real_folder_still_ships_what_the_integration_needs():
+    packaged = surviving(component_files())
 
     assert packaged, "the exclusion list swallowed the whole integration"
-    assert not [name for name in packaged if name.endswith(".md")]
-    assert not [name for name in packaged if "tests/" in name]
-    assert not [name for name in packaged if "__pycache__" in name]
     assert "manifest.json" in packaged
     assert "camera.py" in packaged
+    assert "helpers.py" in packaged
     assert "skyline-webcams-card.js" in packaged
 
 
 def test_only_runtime_file_types_are_packaged():
     unexpected = [
         name
-        for name in packaged_files()
+        for name in surviving(component_files())
         if pathlib.Path(name).suffix not in SHIPPABLE_SUFFIXES
     ]
     assert unexpected == []
