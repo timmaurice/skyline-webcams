@@ -24,7 +24,6 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.network import get_url
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
-import aiohttp
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
 
@@ -333,6 +332,14 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
         self._last_update = 0
         self._fetch_failures = 0
         self._retry_not_before = 0.0
+        # One scrape at a time per camera. Startup asks for the stream URL from
+        # several directions at once, and without this each of them opened its
+        # own request to the same page.
+        self._fetch_lock = asyncio.Lock()
+        # Whether the current run of failures has already been logged at ERROR.
+        # Repeating the same message every 30 seconds for a site that is down
+        # buries everything else in the log.
+        self._failure_logged = False
         self._additional_attributes = {"source": self._url}
         self._attr_available = True
         self._session = None
@@ -397,7 +404,9 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
                 if attr in old_state.attributes:
                     self._additional_attributes[attr] = old_state.attributes[attr]
 
-        self.hass.async_create_task(self.get_fresh_stream_url())
+        # No extra fetch task here: the entity is added with
+        # update_before_add=True and the state write below runs async_update,
+        # so a third request would only race the other two.
         self.async_schedule_update_ha_state(True)
 
     async def async_will_remove_from_hass(self) -> None:
@@ -493,10 +502,25 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
         has proof the cached URL is dead - handing that same URL back would only
         buy another failed fetch.
         """
-        now = asyncio.get_event_loop().time()
-
-        if not force and self._stream_url and (now - self._last_update < 120):
+        if self._is_cached(force):
             return self._stream_url
+
+        async with self._fetch_lock:
+            # Whoever held the lock may have just fetched what we came for.
+            if self._is_cached(force):
+                return self._stream_url
+            return await self._fetch_and_cache(force)
+
+    def _is_cached(self, force: bool) -> bool:
+        """Whether the URL in hand can be served without asking the site."""
+        if force:
+            return False
+        now = asyncio.get_event_loop().time()
+        return bool(self._stream_url) and (now - self._last_update < 120)
+
+    async def _fetch_and_cache(self, force: bool) -> str | None:
+        """Scrape a fresh URL, or serve the cached one while backing off."""
+        now = asyncio.get_event_loop().time()
 
         if not force and now < self._retry_not_before:
             _LOGGER.debug(
@@ -551,12 +575,17 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
             async with asyncio.timeout(20):
                 async with session.get(self._url, headers=headers) as response:
                     if response.status != 200:
+                        self._log_fetch_failure(
+                            "[%s] Webcam page answered %s",
+                            self._attr_name,
+                            response.status,
+                        )
                         self._attr_available = False
                         return None
 
                     self._attr_available = True
                     text = await response.text()
-                    soup = BeautifulSoup(text, "html.parser")
+                    soup = await self._parse_html(text)
 
                     # Extract metadata
                     if h2 := soup.find("h2"):
@@ -604,15 +633,46 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
                     if "livee.m3u8" in stream_path:
                         stream_path = stream_path.replace("livee.m3u8", "live.m3u8")
 
+                    if self._failure_logged:
+                        _LOGGER.info(
+                            "[%s] Stream URL is reachable again", self._attr_name
+                        )
+                        self._failure_logged = False
+
                     if self.entity_id:
                         self.async_write_ha_state()
                     return f"https://hd-auth.skylinewebcams.com/{stream_path}"
 
         except (aiohttp.ClientError, asyncio.TimeoutError) as err:
-            _LOGGER.error(
-                "[%s] Network error while fetching stream URL: %s", self._attr_name, err
+            self._log_fetch_failure(
+                "[%s] Network error while fetching stream URL: %s",
+                self._attr_name,
+                err,
             )
             self._attr_available = False
             if self.entity_id:
                 self.async_write_ha_state()
             return None
+
+    async def _parse_html(self, text: str) -> BeautifulSoup:
+        """Parse a webcam page off the event loop.
+
+        The pages run to hundreds of kilobytes and html.parser is slow enough
+        that parsing them inline stalls the loop for every camera in turn.
+        """
+        return await self.hass.async_add_executor_job(
+            BeautifulSoup, text, "html.parser"
+        )
+
+    def _log_fetch_failure(self, message: str, *args) -> None:
+        """Log the first failure of a run at ERROR, the rest at DEBUG.
+
+        A site that stays down would otherwise write an ERROR line per camera
+        every refresh interval, which is what buried the log during the QA run.
+        Recovery is logged once at INFO.
+        """
+        if self._failure_logged:
+            _LOGGER.debug(message, *args)
+            return
+        _LOGGER.error(message, *args)
+        self._failure_logged = True
