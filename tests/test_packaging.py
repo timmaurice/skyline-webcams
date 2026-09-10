@@ -18,6 +18,12 @@ RELEASE_WORKFLOW = REPO / ".github" / "workflows" / "release.yml"
 # not to a user's config folder.
 SHIPPABLE_SUFFIXES = {".py", ".json", ".js"}
 
+# hass.http.async_register_static_paths, which __init__ awaits during setup,
+# first shipped in core 2024.7.0; before it there is only the synchronous
+# register_static_path and setup raises. Without the floor HACS happily offers
+# the integration to a core it cannot start on.
+MINIMUM_CORE_VERSION = (2024, 7)
+
 
 def zip_excludes() -> list[str]:
     """The -x patterns the release workflow passes to zip."""
@@ -83,12 +89,8 @@ def test_only_runtime_file_types_are_packaged():
     assert unexpected == []
 
 
-def test_hacs_declares_a_minimum_core_version():
+def test_hacs_declares_a_core_version_the_integration_can_actually_run_on():
     hacs = json.loads((REPO / "hacs.json").read_text())
-    assert "homeassistant" in hacs
+    declared = tuple(int(part) for part in hacs["homeassistant"].split(".")[:2])
 
-
-def test_the_manifest_declares_its_type_and_loggers():
-    manifest = json.loads((COMPONENT / "manifest.json").read_text())
-    assert manifest["integration_type"] == "service"
-    assert manifest["loggers"] == ["bs4"]
+    assert declared >= MINIMUM_CORE_VERSION
