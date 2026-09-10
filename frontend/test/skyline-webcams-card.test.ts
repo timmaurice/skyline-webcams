@@ -28,6 +28,43 @@ describe('skyline-webcams-card', () => {
     });
   });
 
+  it('picks a real camera for the stub config so the picker preview works', () => {
+    const hass = {
+      states: {
+        'light.kitchen': { entity_id: 'light.kitchen', state: 'on', attributes: {} },
+        'camera.front_door': { entity_id: 'camera.front_door', state: 'idle', attributes: {} },
+        'camera.venice': {
+          entity_id: 'camera.venice',
+          state: 'streaming',
+          attributes: { source: 'https://www.skylinewebcams.com/en/webcam/venezia.html' },
+        },
+      },
+    };
+
+    // @ts-expect-error Mocking minimal hass
+    const config = SkylineWebcamsCard.getStubConfig(hass, Object.keys(hass.states));
+    expect(config.entity).toBe('camera.venice');
+
+    // The picker feeds the stub straight back into setConfig.
+    expect(() => el.setConfig(config as never)).not.toThrow();
+  });
+
+  it('falls back to any camera when no skyline camera exists', () => {
+    const hass = {
+      states: {
+        'camera.front_door': { entity_id: 'camera.front_door', state: 'idle', attributes: {} },
+      },
+    };
+    // @ts-expect-error Mocking minimal hass
+    expect(SkylineWebcamsCard.getStubConfig(hass, ['light.kitchen', 'camera.front_door']).entity).toBe(
+      'camera.front_door',
+    );
+  });
+
+  it('offers grid options for the sections view', () => {
+    expect(el.getGridOptions()).toEqual({ rows: 'auto', columns: 12, min_columns: 6 });
+  });
+
   it('throws an error if entity is missing in config', () => {
     expect(() => {
       // @ts-expect-error Testing invalid config

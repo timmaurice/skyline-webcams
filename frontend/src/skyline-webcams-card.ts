@@ -22,9 +22,22 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
     return document.createElement('skyline-webcams-card-editor') as LovelaceCardEditor;
   }
 
-  public static getStubConfig(): Record<string, unknown> {
+  /**
+   * Config the card picker previews with.
+   *
+   * It used to hand back an empty entity, which setConfig rejects, so the
+   * preview in the picker was an error message. Pick a real camera instead:
+   * one of this integration's own if there is one, otherwise any camera.
+   */
+  public static getStubConfig(hass?: HomeAssistant, entities?: string[]): Record<string, unknown> {
+    const candidates = (entities?.length ? entities : Object.keys(hass?.states ?? {})).filter((entityId) =>
+      entityId.startsWith('camera.'),
+    );
+    const isSkyline = (entityId: string): boolean =>
+      String(hass?.states?.[entityId]?.attributes?.source ?? '').includes('skylinewebcams');
+
     return {
-      entity: '',
+      entity: candidates.find(isSkyline) ?? candidates[0] ?? '',
       aspect_ratio: '16/9',
       show_video_controls: true,
     };
@@ -56,6 +69,19 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
 
   public getCardSize(): number {
     return 4;
+  }
+
+  /**
+   * Sizing hint for the sections view. A 16/9 video wants the full column
+   * width and a height that follows the aspect ratio rather than a fixed
+   * number of grid rows.
+   */
+  public getGridOptions(): Record<string, unknown> {
+    return {
+      rows: 'auto',
+      columns: 12,
+      min_columns: 6,
+    };
   }
 
   public connectedCallback(): void {
