@@ -52,16 +52,34 @@ test.describe('The card editor in a storage-mode dashboard', () => {
     const editor = dialog.locator('skyline-webcams-card-editor');
     await expect(editor).toBeAttached({ timeout: 30_000 });
 
-    // computeLabel used to be handed to ha-form unbound; it only worked
-    // because ha-form happens to call it with itself as `this`, and the
-    // entity row did not render at all in a harness that did not.
     const form = editor.locator('ha-form');
     await expect(form).toBeVisible();
     await expect(form.locator('ha-entity-picker')).toHaveCount(1);
     await expect(dialog.getByText('Camera Entity', { exact: false })).toBeVisible();
     await expect(dialog.getByText('Aspect Ratio', { exact: false })).toBeVisible();
 
-    // No error banner from a label function that threw.
-    expect(await page.locator('text=localize').count()).toBe(0);
+    // Everything above passes with computeLabel handed over unbound, which is
+    // why the reported missing entity row does not reproduce: real ha-form
+    // calls the label function with itself as `this`, and it carries a `.hass`
+    // of its own, so an unbound `this._computeLabel` resolved our translations
+    // by accident. The rows above are worth asserting, but they cannot tell
+    // the two apart - and neither can a detached call, because localize falls
+    // back to English rather than throwing on a missing hass.
+    //
+    // What does tell them apart is whose hass the label follows. Called with
+    // two different languages as `this`, a bound function ignores both and
+    // answers from the editor's own hass twice; an unbound one answers from
+    // the caller and gives two different labels.
+    const labelsFromForeignLanguages = await form.evaluate((el) => {
+      const computeLabel = (el as HTMLElement & { computeLabel?: (schema: { name: string }) => string }).computeLabel;
+      if (typeof computeLabel !== 'function') {
+        return ['ha-form was given no computeLabel at all'];
+      }
+      return ['de', 'en'].map((language) => computeLabel.call({ hass: { language } }, { name: 'entity' }));
+    });
+
+    expect(labelsFromForeignLanguages[0]).toBe(labelsFromForeignLanguages[1]);
+    // And it is our translation, not the bare schema name.
+    expect(labelsFromForeignLanguages[0]).not.toBe('entity');
   });
 });
