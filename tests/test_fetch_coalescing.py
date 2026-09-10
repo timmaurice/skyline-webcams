@@ -217,3 +217,45 @@ async def test_a_forced_caller_is_never_served_the_entry_it_asked_about():
     await camera.get_fresh_stream_url(force=True)
 
     assert session.requests == 3
+
+
+async def test_an_unexpected_error_arms_the_backoff_and_is_logged_once(caplog):
+    """A failure that is not a ClientError is still an outage.
+
+    It used to escape the handler: the lock released cleanly but no backoff was
+    armed, so the next proxy request scraped again straight away and Home
+    Assistant logged the traceback at ERROR every cycle.
+    """
+    camera = make_camera(FakeSession([RuntimeError("bs4 blew up")]))
+
+    with caplog.at_level(logging.DEBUG):
+        assert await camera.get_fresh_stream_url() is None
+        assert camera._retry_not_before > 0
+        assert camera._attr_available is False
+        assert camera._fetch_lock.locked() is False
+
+        assert await camera.get_fresh_stream_url(force=True) is None
+
+    errors = [r for r in caplog.records if r.levelno == logging.ERROR]
+    debugs = [
+        r
+        for r in caplog.records
+        if r.levelno == logging.DEBUG and "Unexpected error" in r.getMessage()
+    ]
+    assert len(errors) == 1
+    assert "bs4 blew up" in errors[0].getMessage()
+    assert len(debugs) == 1
+
+
+async def test_a_non_200_page_writes_the_unavailability_out(caplog):
+    """Marking the entity unavailable without writing it changes nothing."""
+    camera = make_camera(FakeSession([FakeResponse(status=404)]))
+    camera.entity_id = "camera.test_cam"
+    writes = []
+    camera.async_write_ha_state = lambda: writes.append(1)
+
+    with caplog.at_level(logging.DEBUG):
+        assert await camera.get_fresh_stream_url() is None
+
+    assert camera._attr_available is False
+    assert writes == [1]

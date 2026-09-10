@@ -608,6 +608,11 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
                             response.status,
                         )
                         self._attr_available = False
+                        # Same as the error paths below: an entity that has
+                        # gone unavailable is only unavailable once the state
+                        # is written.
+                        if self.entity_id:
+                            self.async_write_ha_state()
                         return None
 
                     self._attr_available = True
@@ -671,15 +676,32 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
                     return f"https://hd-auth.skylinewebcams.com/{stream_path}"
 
         except (aiohttp.ClientError, asyncio.TimeoutError) as err:
-            self._log_fetch_failure(
-                "[%s] Network error while fetching stream URL: %s",
-                self._attr_name,
-                err,
+            return self._handle_fetch_error(
+                "[%s] Network error while fetching stream URL: %s", err
             )
-            self._attr_available = False
-            if self.entity_id:
-                self.async_write_ha_state()
-            return None
+        except Exception as err:  # noqa: BLE001 - see the docstring below
+            # Anything else is still an outage as far as this camera is
+            # concerned, and it has to arrive at the same place: a failure that
+            # escaped left the backoff unarmed, so the next proxy request
+            # scraped again immediately and Home Assistant logged at ERROR
+            # every cycle - the log flooding this was meant to stop, reached
+            # through a different exception class. The parser runs inside this
+            # try as well, and bs4 does not raise ClientError.
+            return self._handle_fetch_error(
+                "[%s] Unexpected error while fetching stream URL: %s", err
+            )
+
+    def _handle_fetch_error(self, message: str, err: Exception) -> None:
+        """Log a failed scrape once, mark the camera unavailable, give up.
+
+        Returning None puts the caller on the backoff path, which is what keeps
+        a camera whose page is broken from being scraped on every request.
+        """
+        self._log_fetch_failure(message, self._attr_name, err)
+        self._attr_available = False
+        if self.entity_id:
+            self.async_write_ha_state()
+        return None
 
     async def _parse_html(self, text: str) -> BeautifulSoup:
         """Parse a webcam page off the event loop.
