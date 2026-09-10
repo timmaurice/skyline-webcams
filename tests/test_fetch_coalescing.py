@@ -35,14 +35,17 @@ class FakeHass:
 
 
 class FakeResponse:
-    def __init__(self, status=200, text=PAGE):
+    def __init__(self, status=200, text=PAGE, error=None):
         self.status = status
         self._text = text
+        self._error = error
 
     async def text(self):
         # Yield, the way a real read does: without a hand-off point the tasks
         # would run one after the other and never overlap.
         await asyncio.sleep(0)
+        if self._error:
+            raise self._error
         return self._text
 
     async def __aenter__(self):
@@ -168,3 +171,49 @@ async def test_cached_url_is_served_without_a_request(force):
     await camera.get_fresh_stream_url(force=force)
 
     assert session.requests == (2 if force else 1)
+
+
+async def test_concurrent_forced_callers_share_a_single_scrape():
+    """A token expiring under six viewers must cost one request, not six.
+
+    The proxy forces a refresh per playlist request, so every viewer of one
+    camera arrives here at the same moment. Serialising them behind the lock
+    made the last one wait for six scrapes.
+    """
+    session = FakeSession([FakeResponse()])
+    camera = make_camera(session)
+
+    await camera.get_fresh_stream_url()  # the URL the viewers are holding
+    assert session.requests == 1
+
+    urls = await asyncio.gather(
+        *[camera.get_fresh_stream_url(force=True) for _ in range(6)]
+    )
+
+    assert session.requests == 2
+    assert set(urls) == {"https://hd-auth.skylinewebcams.com/live.m3u8?a=token123"}
+
+
+async def test_concurrent_forced_callers_share_a_failed_scrape_too():
+    """An attempt that came back empty answers the callers behind it as well."""
+    session = FakeSession(
+        [FakeResponse(), FakeResponse(error=aiohttp.ClientError("boom"))]
+    )
+    camera = make_camera(session)
+
+    await camera.get_fresh_stream_url()
+    await asyncio.gather(*[camera.get_fresh_stream_url(force=True) for _ in range(6)])
+
+    assert session.requests == 2
+
+
+async def test_a_forced_caller_is_never_served_the_entry_it_asked_about():
+    """force still means a scrape when nothing has happened in the meantime."""
+    session = FakeSession([FakeResponse()])
+    camera = make_camera(session)
+
+    await camera.get_fresh_stream_url()
+    await camera.get_fresh_stream_url(force=True)
+    await camera.get_fresh_stream_url(force=True)
+
+    assert session.requests == 3

@@ -330,6 +330,11 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
         self._attr_unique_id = unique_id
         self._stream_url = None
         self._last_update = 0
+        # Bumped whenever a scrape replaces the URL, and whenever one runs at
+        # all. Together they tell a caller waiting on the lock whether what it
+        # would ask for has already happened.
+        self._stream_version = 0
+        self._fetch_attempts = 0
         self._fetch_failures = 0
         self._retry_not_before = 0.0
         # One scrape at a time per camera. Startup asks for the stream URL from
@@ -501,13 +506,24 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
         `force` skips both the cache and the backoff. The caller uses it when it
         has proof the cached URL is dead - handing that same URL back would only
         buy another failed fetch.
+
+        A forced caller is still coalesced with everyone else waiting on the
+        lock: what it must not be served is the entry it has just proved dead,
+        which is the one it saw on the way in. Anything that happened after
+        that - a newer URL, or a fetch attempt that came back empty - answers
+        its question as well as its own request would have, so the site is
+        asked once no matter how many viewers a token expires under.
         """
+        # Taken before queueing on the lock, so "after" means after this
+        # caller asked, not after it got to the front of the queue.
+        seen = (self._stream_version, self._fetch_attempts)
+
         if self._is_cached(force):
             return self._stream_url
 
         async with self._fetch_lock:
             # Whoever held the lock may have just fetched what we came for.
-            if self._is_cached(force):
+            if self._is_cached(force) or self._has_moved_on(seen):
                 return self._stream_url
             return await self._fetch_and_cache(force)
 
@@ -517,6 +533,10 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
             return False
         now = asyncio.get_event_loop().time()
         return bool(self._stream_url) and (now - self._last_update < 120)
+
+    def _has_moved_on(self, seen: tuple[int, int]) -> bool:
+        """Whether a fetch has run since the caller looked at the cache."""
+        return (self._stream_version, self._fetch_attempts) != seen
 
     async def _fetch_and_cache(self, force: bool) -> str | None:
         """Scrape a fresh URL, or serve the cached one while backing off."""
@@ -534,9 +554,16 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
             # protecting against.
             return self._stream_url
 
-        url = await self._fetch_stream_url()
+        try:
+            url = await self._fetch_stream_url()
+        finally:
+            # Counted even when the scrape raised: the callers behind us asked
+            # for a fetch, and a fetch is what happened.
+            self._fetch_attempts += 1
+
         if url:
             self._stream_url = url
+            self._stream_version += 1
             self._last_update = asyncio.get_event_loop().time()
             self._fetch_failures = 0
             self._retry_not_before = 0.0
