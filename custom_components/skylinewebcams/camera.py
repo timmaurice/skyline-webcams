@@ -95,9 +95,9 @@ async def async_setup_platform(
     # The same normalised id the config entries use, so a camera configured in
     # YAML and the same camera added through the UI are recognised as one. The
     # entity keeps its registry entry: the id is migrated, not replaced.
-    unique_id = async_migrated_unique_id(hass, url, url)
     # For YAML, we use a hash of the URL as the entry_id for safe proxy routing
     entry_id = hashlib.md5(url.encode()).hexdigest()
+    unique_id = async_migrated_unique_id(hass, url, url, entry_id)
 
     camera = SkylineWebcamsCamera(hass, url, name, unique_id, entry_id)
     hass.data[DOMAIN][entry_id] = camera

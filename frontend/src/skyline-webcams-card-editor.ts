@@ -20,6 +20,21 @@ const SCHEMA = [
     selector: { text: {} },
   },
   {
+    name: 'show_title',
+    default: true,
+    selector: { boolean: {} },
+  },
+  {
+    name: 'show_location',
+    default: true,
+    selector: { boolean: {} },
+  },
+  {
+    name: 'show_description',
+    default: true,
+    selector: { boolean: {} },
+  },
+  {
     name: 'show_link',
     selector: { boolean: {} },
   },
@@ -74,6 +89,12 @@ export class SkylineWebcamsCardEditor extends LitElement implements LovelaceCard
         return localize(this.hass, 'editor.title');
       case 'aspect_ratio':
         return localize(this.hass, 'editor.aspect_ratio');
+      case 'show_title':
+        return localize(this.hass, 'editor.show_title');
+      case 'show_location':
+        return localize(this.hass, 'editor.show_location');
+      case 'show_description':
+        return localize(this.hass, 'editor.show_description');
       case 'show_link':
         return localize(this.hass, 'editor.show_link');
       case 'show_video_controls':

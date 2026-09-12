@@ -155,3 +155,40 @@ views:
             show_video_controls: true
     title: Test
     icon: mdi:test-tube
+  - title: Display Options
+    path: display-options
+    icon: mdi:format-text
+    type: sections
+    max_columns: 4
+    sections:
+      - type: grid
+        cards:
+          - type: heading
+            heading: Everything on (default)
+          - type: custom:skyline-webcams-card
+            entity: camera.venice_st_mark_square
+            show_link: true
+      - type: grid
+        cards:
+          - type: heading
+            heading: Title only
+          - type: custom:skyline-webcams-card
+            entity: camera.rome_pantheon
+            show_location: false
+            show_description: false
+      - type: grid
+        cards:
+          - type: heading
+            heading: Stream only
+          - type: custom:skyline-webcams-card
+            entity: camera.shanghai_skyline
+            show_title: false
+            show_location: false
+            show_description: false
+      - type: grid
+        cards:
+          - type: heading
+            heading: picture-entity, for comparison
+          - type: picture-entity
+            entity: camera.kenya_tsavo_east_national_park
+            camera_image: camera.kenya_tsavo_east_national_park

@@ -1,13 +1,27 @@
 import { LitElement, TemplateResult, html, unsafeCSS } from 'lit';
 import { property, state, query } from 'lit/decorators.js';
 import Hls from 'hls.js';
-import { HassEntity, HomeAssistant, LovelaceCard, LovelaceCardEditor, SkylineWebcamsCardConfig } from './types.js';
+import {
+  CardSuggestion,
+  HassEntity,
+  HomeAssistant,
+  LovelaceCard,
+  LovelaceCardEditor,
+  SkylineWebcamsCardConfig,
+} from './types.js';
 import { localize } from './localize.js';
-import { isPiPSupported, togglePiP, toggleFullscreen, fireEvent } from './utils.js';
+import { isPiPSupported, isSkylineCamera, togglePiP, toggleFullscreen, fireEvent } from './utils.js';
 import styles from './styles/card.styles.scss';
 import './skyline-webcams-card-editor.js';
 
 const ELEMENT_NAME = 'skyline-webcams-card';
+
+// What a card the picker creates starts out with, whether it came from the
+// stub or from an entity suggestion. One object so the two cannot drift.
+const DEFAULT_CARD_OPTIONS = {
+  aspect_ratio: '16/9',
+  show_video_controls: true,
+} as const;
 
 // Retry backoff, so a stream that keeps failing does not hammer the proxy.
 const RESTART_BASE_DELAY_MS = 1000;
@@ -36,13 +50,9 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
     const candidates = (entities?.length ? entities : Object.keys(hass?.states ?? {})).filter((entityId) =>
       entityId.startsWith('camera.'),
     );
-    const isSkyline = (entityId: string): boolean =>
-      String(hass?.states?.[entityId]?.attributes?.source ?? '').includes('skylinewebcams');
-
     return {
-      entity: candidates.find(isSkyline) ?? candidates[0] ?? '',
-      aspect_ratio: '16/9',
-      show_video_controls: true,
+      entity: candidates.find((entityId) => isSkylineCamera(hass, entityId)) ?? candidates[0] ?? '',
+      ...DEFAULT_CARD_OPTIONS,
     };
   }
 
@@ -553,12 +563,26 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
 
     // Construct location text
     const locationParts = [place, region, country].filter((p) => !!p);
-    const locationText = locationParts.join(', ');
+
+    // Every text the card can put around the video, after the show_* options
+    // have had their say. Worked out before the template rather than inside it
+    // because the layout depends on whether any of them survived: a card down
+    // to the video alone drops its padding and lets the stream reach the
+    // edges, the way picture-entity shows a camera. Computing them twice - once
+    // to render, once to decide - is how those two answers drift apart.
+    const showTitle = this._config.show_title !== false;
+    const titleInHeader = showTitle && !!this._config.title;
+    const titleUnderVideo = showTitle && !this._config.title ? title : '';
+    const locationText = this._config.show_location !== false ? locationParts.join(', ') : '';
+    const descriptionText = this._config.show_description !== false && description !== title ? description : '';
+    const linkHref = this._config.show_link ? stateObj.attributes.source || '' : '';
+    const hasInfo = !!(titleUnderVideo || locationText || descriptionText || linkHref);
+    const bare = !titleInHeader && !hasInfo;
 
     return html`
-      <ha-card>
+      <ha-card class=${bare ? 'bare' : ''}>
         ${
-          this._config.title
+          titleInHeader
             ? html`
                 <h1 class="card-header" @click=${this._handleMoreInfo} title="Open entity">
                   <div class="name" dir="ltr">${title}</div>
@@ -665,34 +689,41 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
             }
           </div>
 
-          <div class="webcam-info">
-            ${
-              !this._config.title && title
-                ? html`<h2 class="webcam-title" @click=${this._handleMoreInfo} title="Open entity">${title}</h2>`
-                : ''
-            }
-            ${
-              locationText
-                ? html`<p class="webcam-location"><ha-icon icon="mdi:map-marker"></ha-icon> ${locationText}</p>`
-                : ''
-            }
-            ${description && description !== title ? html`<p class="webcam-description">${description}</p>` : ''}
-            ${
-              this._config.show_link && stateObj.attributes.source
-                ? html`
-                    <a
-                      href="${stateObj.attributes.source}"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      class="webcam-source-link"
-                      @click=${(e: Event) => e.stopPropagation()}
-                    >
-                      <ha-icon icon="mdi:open-in-new"></ha-icon> ${localize(this.hass, 'card.view_on_skylinewebcams')}
-                    </a>
-                  `
-                : ''
-            }
-          </div>
+          ${
+            !hasInfo
+              ? ''
+              : html`<div class="webcam-info">
+                  ${
+                    titleUnderVideo
+                      ? html`<h2 class="webcam-title" @click=${this._handleMoreInfo} title="Open entity">
+                          ${titleUnderVideo}
+                        </h2>`
+                      : ''
+                  }
+                  ${
+                    locationText
+                      ? html`<p class="webcam-location"><ha-icon icon="mdi:map-marker"></ha-icon> ${locationText}</p>`
+                      : ''
+                  }
+                  ${descriptionText ? html`<p class="webcam-description">${descriptionText}</p>` : ''}
+                  ${
+                    linkHref
+                      ? html`
+                          <a
+                            href="${stateObj.attributes.source}"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            class="webcam-source-link"
+                            @click=${(e: Event) => e.stopPropagation()}
+                          >
+                            <ha-icon icon="mdi:open-in-new"></ha-icon>
+                            ${localize(this.hass, 'card.view_on_skylinewebcams')}
+                          </a>
+                        `
+                      : ''
+                  }
+                </div>`
+          }
         </div>
       </ha-card>
     `;
@@ -707,6 +738,30 @@ if (!customElements.get(ELEMENT_NAME)) {
   customElements.define(ELEMENT_NAME, SkylineWebcamsCard);
 }
 
+/**
+ * What the picker offers when somebody picks one of our cameras.
+ *
+ * Home Assistant builds the "Suggestions" panel from its own providers plus
+ * every custom card that declares this hook, and it declares none on a card's
+ * behalf - so without it the card is only ever reachable through "Browse all
+ * cards", and a SkylineWebcams camera is offered a `picture-entity` instead,
+ * which shows a still image rather than the stream the card is for.
+ *
+ * Only our own cameras: the card speaks HLS to SkylineWebcams and has nothing
+ * to offer a doorbell, so suggesting it for every `camera.` entity in the
+ * house would be noise in a panel whose value is that it is short.
+ */
+const getEntitySuggestion = (hass: HomeAssistant, entityId: string): CardSuggestion | null => {
+  if (!isSkylineCamera(hass, entityId)) return null;
+  return {
+    config: {
+      type: `custom:${ELEMENT_NAME}`,
+      entity: entityId,
+      ...DEFAULT_CARD_OPTIONS,
+    },
+  };
+};
+
 // Register custom card in Home Assistant picker
 window.customCards = window.customCards || [];
 if (!window.customCards.some((card) => card.type === ELEMENT_NAME)) {
@@ -717,5 +772,6 @@ if (!window.customCards.some((card) => card.type === ELEMENT_NAME)) {
       'A dedicated Lovelace card for Skyline Webcams supporting robust HLS streaming and automatic reconnection.',
     preview: true,
     documentationURL: 'https://github.com/timmaurice/skyline-webcams',
+    getEntitySuggestion,
   });
 }
