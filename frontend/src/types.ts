@@ -57,6 +57,17 @@ export interface SkylineWebcamsCardConfig extends LovelaceCardConfig {
   show_video_controls?: boolean;
 }
 
+/**
+ * What a custom card may hand back from `getEntitySuggestion`. `config.type`
+ * carries the `custom:` prefix, because this is a finished card config rather
+ * than a picker entry - Home Assistant adds that prefix itself only for the
+ * entries it builds out of `customCards`.
+ */
+export interface CardSuggestion {
+  label?: string;
+  config: LovelaceCardConfig;
+}
+
 declare global {
   interface Window {
     customCards?: {
@@ -65,6 +76,14 @@ declare global {
       description: string;
       documentationURL: string;
       preview?: boolean;
+      /**
+       * Opts the card into the picker's "Suggestions" panel for one entity.
+       * Home Assistant asks every custom card that declares it and shows the
+       * built-in providers' answers otherwise - which is why a card without
+       * this is never suggested, whatever else it declares. Returning null
+       * means "not for this entity".
+       */
+      getEntitySuggestion?: (hass: HomeAssistant, entityId: string) => CardSuggestion | CardSuggestion[] | null;
     }[];
   }
 }

@@ -298,3 +298,96 @@ describe('skyline-webcams-card', () => {
     expect(startSpy).not.toHaveBeenCalled();
   });
 });
+
+describe('entity suggestion', () => {
+  const suggestionFor = (hass: unknown, entityId: string) => {
+    const entry = window.customCards?.find((card) => card.type === 'skyline-webcams-card');
+    return entry?.getEntitySuggestion?.(hass as never, entityId) ?? null;
+  };
+
+  it('opts the card into the picker suggestions', () => {
+    // Home Assistant asks only the custom cards that declare this hook and
+    // offers its own providers' answers otherwise - which is why the picker
+    // used to suggest a picture-entity for a SkylineWebcams camera and never
+    // this card, however it was registered.
+    const entry = window.customCards?.find((card) => card.type === 'skyline-webcams-card');
+    expect(typeof entry?.getEntitySuggestion).toBe('function');
+  });
+
+  it('suggests the card for one of our cameras', () => {
+    const hass = {
+      states: {
+        'camera.venice': {
+          entity_id: 'camera.venice',
+          state: 'streaming',
+          attributes: { source: 'https://www.skylinewebcams.com/en/webcam/venezia.html' },
+        },
+      },
+    };
+
+    expect(suggestionFor(hass, 'camera.venice')).toEqual({
+      config: {
+        type: 'custom:skyline-webcams-card',
+        entity: 'camera.venice',
+        aspect_ratio: '16/9',
+        show_video_controls: true,
+      },
+    });
+  });
+
+  it('prefixes the config type with custom:', () => {
+    // A config naming the bare element name is not a card Home Assistant can
+    // build - it renders as "Custom element doesn't exist". The prefix is
+    // added for the entries HA builds itself, never for a config we hand over.
+    const hass = {
+      states: {
+        'camera.venice': {
+          entity_id: 'camera.venice',
+          state: 'streaming',
+          attributes: { source: 'https://www.skylinewebcams.com/en/webcam/venezia.html' },
+        },
+      },
+    };
+    const suggestion = suggestionFor(hass, 'camera.venice');
+    expect(suggestion && 'config' in suggestion && suggestion.config.type).toBe('custom:skyline-webcams-card');
+  });
+
+  it('stays out of the way for a camera that is not ours', () => {
+    // The card speaks HLS to SkylineWebcams and has nothing to offer a
+    // doorbell. The suggestions panel is only useful while it is short.
+    const hass = {
+      states: {
+        'camera.front_door': { entity_id: 'camera.front_door', state: 'idle', attributes: {} },
+      },
+    };
+    expect(suggestionFor(hass, 'camera.front_door')).toBeNull();
+  });
+
+  it('says no to a non-camera and to an entity that is not there', () => {
+    const hass = { states: { 'light.kitchen': { entity_id: 'light.kitchen', state: 'on', attributes: {} } } };
+    expect(suggestionFor(hass, 'light.kitchen')).toBeNull();
+    expect(suggestionFor(hass, 'camera.ghost')).toBeNull();
+    expect(suggestionFor(undefined, 'camera.ghost')).toBeNull();
+  });
+
+  it('suggests what the stub config would have built', () => {
+    // A suggestion the stub would not have produced is one that previews
+    // differently from the card the picker otherwise creates.
+    const hass = {
+      states: {
+        'camera.venice': {
+          entity_id: 'camera.venice',
+          state: 'streaming',
+          attributes: { source: 'https://www.skylinewebcams.com/en/webcam/venezia.html' },
+        },
+      },
+    };
+    const suggestion = suggestionFor(hass, 'camera.venice');
+    const config = suggestion && 'config' in suggestion ? suggestion.config : {};
+    // @ts-expect-error Mocking minimal hass
+    const stub = SkylineWebcamsCard.getStubConfig(hass, Object.keys(hass.states));
+    const withoutType = { ...(config as Record<string, unknown>) };
+    delete withoutType.type;
+    expect(withoutType).toEqual(stub);
+  });
+});
