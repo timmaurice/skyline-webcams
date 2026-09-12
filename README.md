@@ -123,6 +123,9 @@ This integration includes a dedicated custom Lovelace card: `custom:skyline-webc
 | `entity`              | string  | **Required** | The camera entity (e.g., `camera.live_cam_schwangau_neuschwanstein_castle`)  |
 | `title`               | string  | `(none)`     | Custom title for the card (falls back to entity friendly name if omitted)    |
 | `aspect_ratio`        | string  | `16/9`       | Aspect ratio of the video player container (e.g., `16/9`, `4/3`)             |
+| `show_title`          | boolean | `true`       | Show the name, whether it sits in the card header or under the video         |
+| `show_location`       | boolean | `true`       | Show the place, region and country line                                      |
+| `show_description`    | boolean | `true`       | Show the webcam's description                                                |
 | `show_link`           | boolean | `false`      | Show a direct link to the original webcam page on SkylineWebcams             |
 | `show_video_controls` | boolean | `true`       | Show the video overlay controls (Play/Pause, Picture-in-Picture, Fullscreen) |
 
@@ -134,6 +137,26 @@ entity: camera.live_cam_schwangau_neuschwanstein_castle
 aspect_ratio: 16/9
 show_link: true
 ```
+
+#### Just the stream
+
+Switching off everything the card writes around the video leaves it with nothing
+to frame, so it drops its padding and lets the picture reach the card's edges —
+the way Home Assistant's own `picture-entity` shows a camera:
+
+```yaml
+type: custom:skyline-webcams-card
+entity: camera.live_cam_schwangau_neuschwanstein_castle
+show_title: false
+show_location: false
+show_description: false
+```
+
+Nothing to turn on for that: it follows from there being no text left. A card
+that still shows one line — a title, the link, anything — keeps its padding. The
+same happens by itself for a webcam that carries no description or location and
+whose name is switched off. The video controls stay either way; they sit on the
+picture rather than beside it, and `show_video_controls: false` removes them.
 
 <details>
 <summary>Alternative Generic Card configuration</summary>

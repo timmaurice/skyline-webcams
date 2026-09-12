@@ -391,3 +391,116 @@ describe('entity suggestion', () => {
     expect(withoutType).toEqual(stub);
   });
 });
+
+describe('the text around the video', () => {
+  let el: SkylineWebcamsCard;
+
+  const FULL_CAM = {
+    state: 'idle',
+    attributes: {
+      friendly_name: 'Venice - St Mark Square',
+      description: 'Webcam overlooking St. Mark’s Square',
+      place: 'Venice',
+      region: 'Veneto',
+      country: 'Italy',
+      source: 'https://www.skylinewebcams.com/en/webcam/venezia.html',
+    },
+  };
+
+  const show = async (config: Record<string, unknown>, attributes = FULL_CAM.attributes) => {
+    el.setConfig({ entity: 'camera.venice', ...config } as never);
+    // @ts-expect-error Mocking minimal hass
+    el.hass = {
+      states: { 'camera.venice': { ...FULL_CAM, attributes } },
+      callWS: () => Promise.resolve({ url: '/api/mock' }),
+    };
+    await el.updateComplete;
+  };
+
+  const has = (selector: string) => el.shadowRoot?.querySelector(selector) !== null;
+
+  beforeEach(() => {
+    el = document.createElement('skyline-webcams-card') as SkylineWebcamsCard;
+    document.body.appendChild(el);
+  });
+
+  afterEach(() => {
+    document.body.removeChild(el);
+  });
+
+  it('shows the title, the location and the description by default', async () => {
+    await show({});
+    expect(has('.webcam-title')).toBe(true);
+    expect(has('.webcam-location')).toBe(true);
+    expect(has('.webcam-description')).toBe(true);
+    // A card that still has something to say keeps its padding.
+    expect(has('ha-card.bare')).toBe(false);
+  });
+
+  it('hides each text on its own', async () => {
+    await show({ show_title: false });
+    expect(has('.webcam-title')).toBe(false);
+    expect(has('.webcam-location')).toBe(true);
+
+    await show({ show_location: false });
+    expect(has('.webcam-location')).toBe(false);
+    expect(has('.webcam-title')).toBe(true);
+
+    await show({ show_description: false });
+    expect(has('.webcam-description')).toBe(false);
+    expect(has('.webcam-title')).toBe(true);
+  });
+
+  it('hides the name in the header too, not just under the video', async () => {
+    // `title` moves the name into the card header. Switching the name off has
+    // to reach it there as well, or "hide the title" hides it in one place and
+    // leaves it in the other.
+    await show({ title: 'My Webcam' });
+    expect(el.shadowRoot?.querySelector('.card-header')?.textContent?.trim()).toBe('My Webcam');
+
+    await show({ title: 'My Webcam', show_title: false });
+    expect(has('.card-header')).toBe(false);
+  });
+
+  it('drops the card padding once only the stream is left', async () => {
+    // What the option is for: the stream on its own, shown the way
+    // picture-entity shows a camera rather than as a picture in a padded box.
+    await show({ show_title: false, show_location: false, show_description: false });
+    expect(has('.webcam-info')).toBe(false);
+    expect(has('ha-card.bare')).toBe(true);
+    // The video is still there, and so is the card that carries the theme.
+    expect(has('.video-container')).toBe(true);
+    expect(has('ha-card')).toBe(true);
+  });
+
+  it('keeps the padding while the link is still shown', async () => {
+    // The link lives in the same block as the texts, so it counts as content.
+    await show({ show_title: false, show_location: false, show_description: false, show_link: true });
+    expect(has('.webcam-source-link')).toBe(true);
+    expect(has('ha-card.bare')).toBe(false);
+  });
+
+  it('keeps the padding while a configured title is still shown', async () => {
+    await show({ title: 'My Webcam', show_location: false, show_description: false });
+    expect(has('ha-card.bare')).toBe(false);
+  });
+
+  it('goes bare for a camera that has no text to show anyway', async () => {
+    // Nothing switched off - the camera simply carries no location and no
+    // description, and its name is off. Padding around nothing is still
+    // padding around nothing.
+    await show({ show_title: false }, { friendly_name: 'Bare Cam' });
+    expect(has('ha-card.bare')).toBe(true);
+  });
+
+  it('leaves an existing card untouched', async () => {
+    // Every option defaults to the old behaviour: a config written before they
+    // existed has to render exactly as it did.
+    await show({ show_link: true });
+    expect(has('.webcam-title')).toBe(true);
+    expect(has('.webcam-location')).toBe(true);
+    expect(has('.webcam-description')).toBe(true);
+    expect(has('.webcam-source-link')).toBe(true);
+    expect(has('ha-card.bare')).toBe(false);
+  });
+});

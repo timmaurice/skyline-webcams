@@ -53,6 +53,10 @@ export interface SkylineWebcamsCardConfig extends LovelaceCardConfig {
   entity: string;
   title?: string;
   aspect_ratio?: string;
+  /** Off hides the name, wherever it is shown - header or under the video. */
+  show_title?: boolean;
+  show_location?: boolean;
+  show_description?: boolean;
   show_link?: boolean;
   show_video_controls?: boolean;
 }

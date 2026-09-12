@@ -563,12 +563,26 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
 
     // Construct location text
     const locationParts = [place, region, country].filter((p) => !!p);
-    const locationText = locationParts.join(', ');
+
+    // Every text the card can put around the video, after the show_* options
+    // have had their say. Worked out before the template rather than inside it
+    // because the layout depends on whether any of them survived: a card down
+    // to the video alone drops its padding and lets the stream reach the
+    // edges, the way picture-entity shows a camera. Computing them twice - once
+    // to render, once to decide - is how those two answers drift apart.
+    const showTitle = this._config.show_title !== false;
+    const titleInHeader = showTitle && !!this._config.title;
+    const titleUnderVideo = showTitle && !this._config.title ? title : '';
+    const locationText = this._config.show_location !== false ? locationParts.join(', ') : '';
+    const descriptionText = this._config.show_description !== false && description !== title ? description : '';
+    const linkHref = this._config.show_link ? stateObj.attributes.source || '' : '';
+    const hasInfo = !!(titleUnderVideo || locationText || descriptionText || linkHref);
+    const bare = !titleInHeader && !hasInfo;
 
     return html`
-      <ha-card>
+      <ha-card class=${bare ? 'bare' : ''}>
         ${
-          this._config.title
+          titleInHeader
             ? html`
                 <h1 class="card-header" @click=${this._handleMoreInfo} title="Open entity">
                   <div class="name" dir="ltr">${title}</div>
@@ -675,34 +689,41 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
             }
           </div>
 
-          <div class="webcam-info">
-            ${
-              !this._config.title && title
-                ? html`<h2 class="webcam-title" @click=${this._handleMoreInfo} title="Open entity">${title}</h2>`
-                : ''
-            }
-            ${
-              locationText
-                ? html`<p class="webcam-location"><ha-icon icon="mdi:map-marker"></ha-icon> ${locationText}</p>`
-                : ''
-            }
-            ${description && description !== title ? html`<p class="webcam-description">${description}</p>` : ''}
-            ${
-              this._config.show_link && stateObj.attributes.source
-                ? html`
-                    <a
-                      href="${stateObj.attributes.source}"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      class="webcam-source-link"
-                      @click=${(e: Event) => e.stopPropagation()}
-                    >
-                      <ha-icon icon="mdi:open-in-new"></ha-icon> ${localize(this.hass, 'card.view_on_skylinewebcams')}
-                    </a>
-                  `
-                : ''
-            }
-          </div>
+          ${
+            !hasInfo
+              ? ''
+              : html`<div class="webcam-info">
+                  ${
+                    titleUnderVideo
+                      ? html`<h2 class="webcam-title" @click=${this._handleMoreInfo} title="Open entity">
+                          ${titleUnderVideo}
+                        </h2>`
+                      : ''
+                  }
+                  ${
+                    locationText
+                      ? html`<p class="webcam-location"><ha-icon icon="mdi:map-marker"></ha-icon> ${locationText}</p>`
+                      : ''
+                  }
+                  ${descriptionText ? html`<p class="webcam-description">${descriptionText}</p>` : ''}
+                  ${
+                    linkHref
+                      ? html`
+                          <a
+                            href="${stateObj.attributes.source}"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            class="webcam-source-link"
+                            @click=${(e: Event) => e.stopPropagation()}
+                          >
+                            <ha-icon icon="mdi:open-in-new"></ha-icon>
+                            ${localize(this.hass, 'card.view_on_skylinewebcams')}
+                          </a>
+                        `
+                      : ''
+                  }
+                </div>`
+          }
         </div>
       </ha-card>
     `;

@@ -3,13 +3,16 @@
     "entity": "Camera Entity",
     "title": "Title (Optional)",
     "aspect_ratio": "Aspect Ratio (Default: 16/9)",
+    "show_title": "Show Title",
+    "show_location": "Show Location",
+    "show_description": "Show Description",
     "show_link": "Show Website Link",
     "show_video_controls": "Show Video Controls"
   },
   "card": {
     "entity_not_found": "Entity not found: {entity}",
     "no_entity": "Pick a camera entity to show a webcam here.",
-    "entity_unavailable": "Camera unavailable \u2014 reconnecting automatically.",
+    "entity_unavailable": "Camera unavailable — reconnecting automatically.",
     "retry": "Retry",
     "play": "Play",
     "pause": "Pause",

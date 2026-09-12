@@ -9,6 +9,29 @@
   gap: 16px;
 }
 
+// Nothing left but the stream: no header, and every text under the video
+// either switched off or absent. The padding then frames empty space, so the
+// video takes the whole card the way picture-entity shows a camera. The card
+// itself stays - it is what carries the theme's surface, its corners and its
+// elevation, and what a sections or masonry view lays out - it just has
+// nothing left to put around the picture. `overflow: hidden` is what rounds
+// the video's corners once it owns them.
+ha-card.bare {
+  overflow: hidden;
+
+  .card-content {
+    padding: 0;
+    gap: 0;
+  }
+
+  // Its own radius and shadow were for a video sitting inside a padded card.
+  // Against the card's edge they draw a second border just inside the first.
+  .video-container {
+    border-radius: 0;
+    box-shadow: none;
+  }
+}
+
 .video-container {
   position: relative;
   width: 100%;

@@ -3,13 +3,16 @@
     "entity": "Kamera-Entität",
     "title": "Titel (Optional)",
     "aspect_ratio": "Seitenverhältnis (Standard: 16/9)",
+    "show_title": "Titel anzeigen",
+    "show_location": "Ort anzeigen",
+    "show_description": "Beschreibung anzeigen",
     "show_link": "Webseiten-Link anzeigen",
     "show_video_controls": "Videosteuerelemente anzeigen"
   },
   "card": {
     "entity_not_found": "Entität nicht gefunden: {entity}",
     "no_entity": "Wähle eine Kamera-Entität, um hier eine Webcam anzuzeigen.",
-    "entity_unavailable": "Kamera nicht verfügbar \u2013 Verbindung wird automatisch wiederhergestellt.",
+    "entity_unavailable": "Kamera nicht verfügbar – Verbindung wird automatisch wiederhergestellt.",
     "retry": "Wiederholen",
     "play": "Abspielen",
     "pause": "Pausieren",
