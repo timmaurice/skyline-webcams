@@ -164,3 +164,114 @@ async def test_a_yaml_camera_keeps_its_entity_when_the_id_is_normalised(yaml_has
     )
 
     assert registry.async_get(entity.entity_id).unique_id == NORMALISED
+
+
+async def test_a_yaml_camera_survives_the_next_restart(yaml_hass, caplog):
+    """The restart after the migration must not mint a second camera.
+
+    This is what a YAML user saw. On the first start after the normalisation
+    the camera's registry entry is moved from the raw URL onto the normalised
+    id - that much the test above pins. On the *next* start nothing holds the
+    raw URL any more, so the collision check found the normalised id "taken",
+    could not see that the holder was this very camera, and backed off onto the
+    raw URL. Home Assistant then had two ids for one webcam: it kept the
+    migrated entity, registered a second one beside it as `camera.<name>_2`,
+    and the first went unavailable - taking every dashboard, automation and
+    template that named it with it.
+
+    Nothing owns the old id, so there is nothing to migrate and nothing to
+    collide with. The camera simply is the entity that already holds the
+    normalised id.
+    """
+    registry = er.async_get(yaml_hass)
+    config = {CONF_URL: CAMERA_URL, "name": "Neuschwanstein"}
+
+    # First start: the raw-URL entity is migrated onto the normalised id.
+    migrated = registry.async_get_or_create("camera", DOMAIN, CAMERA_URL)
+    await async_setup_platform(
+        yaml_hass, config, lambda entities, update_before_add=False: None
+    )
+    assert registry.async_get(migrated.entity_id).unique_id == NORMALISED
+
+    # Second start: same configuration, same camera, nothing else changed.
+    caplog.clear()
+    added: list = []
+    await async_setup_platform(
+        yaml_hass,
+        config,
+        lambda entities, update_before_add=False: added.extend(entities),
+    )
+
+    assert [camera.unique_id for camera in added] == [NORMALISED]
+    assert "already uses" not in caplog.text
+    # Still one camera, and still the one that was there before.
+    assert (
+        registry.async_get_entity_id("camera", DOMAIN, NORMALISED) == migrated.entity_id
+    )
+    assert registry.async_get_entity_id("camera", DOMAIN, CAMERA_URL) is None
+
+
+def registering(hass, added: list):
+    """An `async_add_entities` that registers, the way Home Assistant's does.
+
+    A stub that only collects the cameras leaves the registry empty, so the
+    next camera finds nothing holding the id and the collision under test never
+    happens. Registering is the part of adding an entity that this file is
+    about.
+    """
+    registry = er.async_get(hass)
+
+    def _add(entities, update_before_add: bool = False) -> None:
+        for camera in entities:
+            registry.async_get_or_create(
+                "camera", DOMAIN, camera.unique_id, suggested_object_id=camera.name
+            )
+            added.append(camera)
+
+    return _add
+
+
+async def test_a_real_collision_is_still_left_alone(yaml_hass, caplog):
+    """The back-off is for a genuine clash and has to survive the fix.
+
+    Two YAML cameras pointing at the same page under different spellings: the
+    second one's id normalises onto an entity the first is already running.
+    Taking it away would cost that camera its history and its customisations,
+    so the duplicate stays and the user decides.
+
+    The first camera is set up rather than faked into the registry, because the
+    fix turns on exactly that difference: a row somebody is running is a rival,
+    a row left behind by an earlier start is this camera's own.
+    """
+    added: list = []
+    for url, name in ((CAMERA_URL, "English"), (OTHER_SPELLING, "German")):
+        await async_setup_platform(
+            yaml_hass, {CONF_URL: url, "name": name}, registering(yaml_hass, added)
+        )
+
+    assert [camera.unique_id for camera in added] == [NORMALISED, OTHER_SPELLING]
+    assert "already uses" in caplog.text
+
+
+async def test_a_yaml_camera_survives_a_reload_too(yaml_hass, caplog):
+    """Reloading the YAML leaves the previous run's cameras in `hass.data`.
+
+    A restart clears it; "Reload all YAML configuration" does not. Finding
+    itself still in there must not read as a rival, or a reload would mint the
+    duplicate a restart no longer does.
+    """
+    config = {CONF_URL: CAMERA_URL, "name": "Neuschwanstein"}
+    await async_setup_platform(
+        yaml_hass, config, lambda entities, update_before_add=False: None
+    )
+
+    caplog.clear()
+    added: list = []
+    await async_setup_platform(
+        yaml_hass,
+        config,
+        lambda entities, update_before_add=False: added.extend(entities),
+    )
+
+    assert [camera.unique_id for camera in added] == [NORMALISED]
+    assert "already uses" not in caplog.text

@@ -44,7 +44,7 @@ def unique_id_for_url(url: str) -> str:
 
 @callback
 def async_migrated_unique_id(
-    hass: HomeAssistant, old_unique_id: str | None, url: str
+    hass: HomeAssistant, old_unique_id: str | None, url: str, own_key: str | None = None
 ) -> str | None:
     """Return the normalised id for a camera, taking its entity along.
 
@@ -63,10 +63,15 @@ def async_migrated_unique_id(
     old_entity_id = registry.async_get_entity_id(CAMERA_DOMAIN, DOMAIN, old_unique_id)
     taken_by = registry.async_get_entity_id(CAMERA_DOMAIN, DOMAIN, new_unique_id)
 
-    if taken_by and taken_by != old_entity_id:
-        # Two entries for one camera is the mess the normalised id prevents,
-        # but which of them survives is the user's call: unregistering a
-        # working entity to tidy up an id would be worse than the duplicate.
+    if (
+        taken_by
+        and taken_by != old_entity_id
+        and _is_live(hass, taken_by, new_unique_id, own_key)
+    ):
+        # Two configurations for one camera - the same page under its /en/ and
+        # its /de/ spelling, say. Both normalise onto one id, and which of them
+        # survives is the user's call: unregistering a working entity to tidy
+        # up an id would be worse than the duplicate.
         _LOGGER.warning(
             "Keeping the unique id of %s as %s: %s already uses %s",
             old_entity_id or old_unique_id,
@@ -76,6 +81,15 @@ def async_migrated_unique_id(
         )
         return old_unique_id
 
+    if taken_by:
+        # The id is held by a registry entry nothing is providing - this very
+        # camera, left behind by an earlier run. Taking it back is what the
+        # normalisation was for, and it restores the entity id the camera had
+        # before, along with its history and everything set on it. The row
+        # under the old id becomes the leftover instead, and can be deleted.
+        _LOGGER.debug("Taking %s back over from a previous run", new_unique_id)
+        return new_unique_id
+
     if old_entity_id:
         _LOGGER.debug(
             "Migrating the unique id of %s to %s", old_entity_id, new_unique_id
@@ -83,3 +97,33 @@ def async_migrated_unique_id(
         registry.async_update_entity(old_entity_id, new_unique_id=new_unique_id)
 
     return new_unique_id
+
+
+def _is_live(
+    hass: HomeAssistant, entity_id: str, unique_id: str, own_key: str | None
+) -> bool:
+    """Whether something is really using `entity_id` and its id right now.
+
+    The registry alone cannot tell the two cases apart. A row holding the
+    normalised id is either a camera somebody else configured, or this same
+    camera's row from an earlier start - the migration writes exactly such a
+    row, and reading it as a rival is what used to hand the camera its raw URL
+    back on the next restart and register a duplicate `camera.<name>_2` beside
+    it, leaving the original unavailable.
+
+    What separates them is whether anything still provides that row. A row that
+    belongs to a config entry is alive as long as the entry is; a YAML row
+    belongs to no entry, so what answers for it is whether some *other* camera
+    this integration has set up carries the id. `own_key` is what makes that
+    "other" hold: a YAML camera is stored under a key derived from its URL, so
+    finding itself there again - which is what a reload does, where the data
+    from the previous run is still around - is not a rival.
+    """
+    registry = er.async_get(hass)
+    entry = registry.async_get(entity_id)
+    if entry is not None and entry.config_entry_id:
+        return hass.config_entries.async_get_entry(entry.config_entry_id) is not None
+    return any(
+        key != own_key and getattr(camera, "unique_id", None) == unique_id
+        for key, camera in hass.data.get(DOMAIN, {}).items()
+    )

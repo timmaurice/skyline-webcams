@@ -129,7 +129,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         return True
 
     unique_id = async_migrated_unique_id(
-        hass, entry.unique_id, entry.data.get(CONF_URL, "")
+        hass, entry.unique_id, entry.data.get(CONF_URL, ""), entry.entry_id
     )
     if unique_id != entry.unique_id:
         _LOGGER.info(
