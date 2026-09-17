@@ -81,7 +81,7 @@ describe('skyline-webcams-card', () => {
   });
 
   it('offers grid options for the sections view', () => {
-    expect(el.getGridOptions()).toEqual({ rows: 'auto', columns: 12, min_columns: 6 });
+    expect(el.getGridOptions()).toEqual({ columns: 'full', min_columns: 6, rows: 'auto' });
   });
 
   it('still rejects a config that is not there at all', () => {

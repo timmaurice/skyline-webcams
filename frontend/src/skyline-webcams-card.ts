@@ -8,6 +8,7 @@ import {
   LovelaceCard,
   LovelaceCardEditor,
   SkylineWebcamsCardConfig,
+  LovelaceGridOptions,
 } from './types.js';
 import { localize } from './localize.js';
 import { isPiPSupported, isSkylineCamera, togglePiP, toggleFullscreen, fireEvent } from './utils.js';
@@ -97,12 +98,8 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
    * width and a height that follows the aspect ratio rather than a fixed
    * number of grid rows.
    */
-  public getGridOptions(): Record<string, unknown> {
-    return {
-      rows: 'auto',
-      columns: 12,
-      min_columns: 6,
-    };
+  public getGridOptions(): LovelaceGridOptions {
+    return { columns: 'full', min_columns: 6, rows: 'auto' };
   }
 
   public connectedCallback(): void {
