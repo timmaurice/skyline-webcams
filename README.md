@@ -91,6 +91,10 @@ camera:
     url: 'https://www.skylinewebcams.com/en/webcam/italia/lazio/roma/pantheon.html'
 ```
 
+### With SSL enabled
+
+If Home Assistant serves HTTPS itself (an `ssl_certificate` in its HTTP settings), set an internal URL under **Settings → System → Network → Home Assistant URL**. Without one, the integration reaches its own stream proxy at `https://127.0.0.1:<port>`. HLS still plays, but WebRTC (go2rtc) rejects the certificate because it is not issued for `127.0.0.1`, so camera views fall back to the HLS player. Home Assistant raises a repair for SSL without a configured URL as well.
+
 ## Created Sensors
 
 | Sensor   | Description            | Attributes    | Example Value                                                                  |
