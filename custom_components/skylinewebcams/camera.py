@@ -22,9 +22,10 @@ from homeassistant.const import CONF_URL, CONF_NAME
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
-from homeassistant.helpers.network import get_url
+from homeassistant.helpers.network import NoURLAvailableError, get_url
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
 import homeassistant.helpers.config_validation as cv
+from homeassistant.util.network import normalize_url
 import voluptuous as vol
 
 from .const import DOMAIN
@@ -62,6 +63,21 @@ def is_allowed_stream_url(url: str | None) -> bool:
         return False
     host = (parsed.hostname or "").lower()
     return host == ALLOWED_STREAM_HOST or host.endswith("." + ALLOWED_STREAM_HOST)
+
+
+def local_server_url(hass: HomeAssistant) -> str | None:
+    """Return the loopback URL of the HTTP server this instance is running.
+
+    The stream worker runs inside Home Assistant, so loopback always reaches
+    the server. Scheme and port come from the server's active config: the port
+    is not a constant (Supervisor installs default to 80 since 2026.8, and it
+    can be changed), and a server with a certificate does not answer plain HTTP.
+    """
+    api = hass.config.api
+    if api is None:
+        return None
+    scheme = "https" if api.use_ssl else "http"
+    return normalize_url(f"{scheme}://127.0.0.1:{api.port}")
 
 
 PLATFORM_SCHEMA = cv.PLATFORM_SCHEMA.extend(
@@ -497,8 +513,15 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
         # When HA tries to load this, our View intercepts it and redirects to a fresh token!
         try:
             base_url = get_url(self.hass, prefer_external=False)
-        except Exception:
-            base_url = "http://127.0.0.1:8123"
+        except NoURLAvailableError:
+            base_url = local_server_url(self.hass)
+            if base_url is None:
+                _LOGGER.warning(
+                    "[%s] No URL to this Home Assistant instance and no HTTP "
+                    "server config to fall back on; cannot provide a stream",
+                    self._attr_name,
+                )
+                return None
 
         proxy_url = f"{base_url}/api/skylinewebcams_proxy/{self._entry_id}.m3u8"
         _LOGGER.debug(
