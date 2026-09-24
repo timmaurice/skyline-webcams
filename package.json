@@ -1,6 +1,6 @@
 {
   "name": "skyline-webcams-card",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "description": "A Lovelace card for Skyline Webcams.",
   "repository": {
     "type": "git",
