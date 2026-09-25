@@ -33,6 +33,14 @@ from .helpers import async_migrated_unique_id
 
 _LOGGER = logging.getLogger(__name__)
 
+# No limit. Cameras do not poll (Camera sets should_poll to False), so
+# async_update only runs when the entity is added or update_entity is called.
+# The scrapes behind it are already serialised per camera by _fetch_lock, and
+# each camera scrapes its own page. A semaphore would only make one camera's
+# actions (snapshot, record) wait for another's scrape: the YAML cameras share
+# one platform, and with it one semaphore.
+PARALLEL_UPDATES = 0
+
 ALLOWED_STREAM_HOST = "skylinewebcams.com"
 
 # Backoff for the scraper, so a camera whose page is down does not get scraped
