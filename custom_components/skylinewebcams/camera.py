@@ -348,6 +348,16 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
     _attr_supported_features = CameraEntityFeature.STREAM
     _attr_frontend_stream_type = "hls"
     _attr_icon = "mdi:webcam"
+    # The name is still set per camera: it is what the user called it, in the
+    # config flow or in YAML, so there is no fixed name to translate. The
+    # translation key carries the names of the state attributes instead.
+    #
+    # Switching has_entity_name on renames nothing that exists. Every camera
+    # has a unique id, so its registry entry keeps the entity id it was given,
+    # and without a device the friendly name is the entity name alone, the same
+    # string as before.
+    _attr_has_entity_name = True
+    _attr_translation_key = "webcam"
 
     def __init__(
         self,

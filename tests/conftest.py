@@ -20,6 +20,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.core import HomeAssistant
+from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.skylinewebcams.const import CONF_URL, DOMAIN
@@ -50,22 +51,45 @@ def make_entry(
     return entry
 
 
+def _no_scrape():
+    return patch(
+        "custom_components.skylinewebcams.camera.SkylineWebcamsCamera"
+        "._fetch_stream_url",
+        AsyncMock(return_value=STREAM_URL),
+    )
+
+
 @pytest.fixture
-def setup_entry(
-    hass: HomeAssistant, enable_custom_integrations: None
-) -> Callable[[MockConfigEntry], Awaitable[None]]:
-    """Return a coroutine that sets an entry up through Home Assistant."""
+def stand_ins(hass: HomeAssistant, enable_custom_integrations: None) -> None:
+    """The http and stream stand-ins described at the top of this file."""
     hass.http = MagicMock()
     hass.http.async_register_static_paths = AsyncMock()
     hass.config.components.update({"http", "stream", "ffmpeg"})
 
+
+@pytest.fixture
+def setup_entry(
+    hass: HomeAssistant, stand_ins: None
+) -> Callable[[MockConfigEntry], Awaitable[None]]:
+    """Return a coroutine that sets an entry up through Home Assistant."""
+
     async def _setup(entry: MockConfigEntry) -> None:
-        with patch(
-            "custom_components.skylinewebcams.camera.SkylineWebcamsCamera"
-            "._fetch_stream_url",
-            AsyncMock(return_value=STREAM_URL),
-        ):
+        with _no_scrape():
             assert await hass.config_entries.async_setup(entry.entry_id)
+            await hass.async_block_till_done()
+
+    return _setup
+
+
+@pytest.fixture
+def setup_yaml(hass: HomeAssistant, stand_ins: None) -> Callable[..., Awaitable[None]]:
+    """Return a coroutine that sets YAML cameras up through the camera platform."""
+
+    async def _setup(*cameras: dict) -> None:
+        with _no_scrape():
+            assert await async_setup_component(
+                hass, "camera", {"camera": list(cameras)}
+            )
             await hass.async_block_till_done()
 
     return _setup

@@ -55,5 +55,34 @@
       "already_configured": "Webcam is already configured",
       "unknown": "Unexpected error occurred."
     }
+  },
+  "entity": {
+    "camera": {
+      "webcam": {
+        "state_attributes": {
+          "description": {
+            "name": "Description"
+          },
+          "country": {
+            "name": "Country"
+          },
+          "region": {
+            "name": "Region"
+          },
+          "place": {
+            "name": "Place"
+          },
+          "poster": {
+            "name": "Poster"
+          },
+          "source": {
+            "name": "Source"
+          },
+          "entry_id": {
+            "name": "Entry ID"
+          }
+        }
+      }
+    }
   }
 }
