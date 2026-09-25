@@ -119,7 +119,7 @@ If Home Assistant serves HTTPS itself (an `ssl_certificate` in its HTTP settings
 
 A camera added through the UI also gets a device of its own, a service named after the entry, and the camera takes its name from it: renaming the device renames the camera, while its entity ID stays. Cameras from YAML have no device, Home Assistant only gives devices to UI entries.
 
-For a camera that does not play, **Download diagnostics** on its entry reports whether it holds a stream URL, how old that is and where the retry backoff stands. The stream token and the entry ID are redacted, so the file can be attached to an issue.
+For a camera that does not play, **Download diagnostics** on its entry reports whether it holds a stream URL, how old that is and where the retry backoff stands. The stream token is redacted, and so is the entry ID wherever the integration reports it. Home Assistant itself names the file after the entry and lists the entry's setup time under its ID, so rename the file and remove that `setup_times` line before attaching it to a public issue.
 
 ### Lovelace Card
 
