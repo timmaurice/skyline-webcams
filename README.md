@@ -68,6 +68,16 @@ The Docker environment comes **pre-configured** with five live webcams (Neuschwa
 2.  Enter the full URL of the webcam you want to add.
     - Example: `https://www.skylinewebcams.com/en/webcam/deutschland/bayern/schwangau/schloss-neuschwanstein.html`
 
+#### Reconfigure
+
+When a webcam's page moves, or you want the page in another language, point the existing entry at the new URL instead of deleting it: on the integration's page, open the entry's menu (**⋮**) and pick **Reconfigure**, then enter the new URL.
+
+- The camera keeps its entity ID, its history and its device, so dashboards and automations that use it keep working.
+- The new URL is checked like one entered under **Manual URL**. A URL another entry already watches is refused; the entry's own URL, in any spelling, is accepted.
+- The entry keeps a title you gave it. A title the integration chose, the heading of the webcam's page, becomes the heading of the new page. If the old page can no longer be reached, the title is kept.
+
+Cameras configured in YAML have no entry to reconfigure: change their `url` in `configuration.yaml`.
+
 ### YAML
 
 You can also configure cameras directly in your `configuration.yaml`:
