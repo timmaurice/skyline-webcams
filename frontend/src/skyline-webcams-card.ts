@@ -28,8 +28,8 @@ const DEFAULT_CARD_OPTIONS = {
 const RESTART_BASE_DELAY_MS = 1000;
 const RESTART_MAX_DELAY_MS = 30000;
 
-// States in which Home Assistant strips the attributes of the entity, entry_id
-// included. Without it there is nothing to point the proxy at.
+// States in which Home Assistant strips the attributes of the entity, the proxy
+// token included. Without it there is nothing to point the proxy at.
 const UNAVAILABLE_STATES = ['unavailable', 'unknown'];
 
 export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
@@ -297,7 +297,7 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
       }
 
       if (this._isUnavailable(stateObj)) {
-        // entry_id is gone with the rest of the attributes. Bail out quietly,
+        // proxy_token is gone with the rest of the attributes. Bail out quietly,
         // the availability watcher restarts us when the camera is back.
         console.debug(`skyline-webcams-card: ${this._config.entity} is unavailable, not starting a stream`);
         this._unavailable = true;
@@ -306,9 +306,12 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
         return;
       }
 
-      const entryId = stateObj.attributes.entry_id;
-      if (!entryId) {
-        console.warn('skyline-webcams-card: entry_id not found, falling back to camera/stream');
+      // The proxy is not routed by entry_id any more: it is served without
+      // authentication, and the entry id is no secret. The token is, and it is
+      // new after every restart, so it is read fresh on every start.
+      const proxyToken = stateObj.attributes.proxy_token as string | undefined;
+      if (!proxyToken) {
+        console.warn('skyline-webcams-card: proxy_token not found, falling back to camera/stream');
         const result = await this.hass.callWS<{ url: string }>({
           type: 'camera/stream',
           entity_id: this._config.entity,
@@ -320,7 +323,7 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
         }
       } else {
         // Point directly to our internal HLS proxy endpoint
-        this._streamUrl = `/api/skylinewebcams_proxy/${entryId}.m3u8?t=${Date.now()}`;
+        this._streamUrl = `/api/skylinewebcams_proxy/${encodeURIComponent(proxyToken)}.m3u8?t=${Date.now()}`;
       }
 
       if (this._streamSessionId !== sessionId) return;

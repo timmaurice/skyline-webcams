@@ -208,7 +208,7 @@ describe('skyline-webcams-card', () => {
 
   it('shows an unavailable state instead of a black area when the camera goes unavailable', async () => {
     el.setConfig({ entity: 'camera.test_cam' });
-    // Home Assistant strips the attributes of an unavailable entity, so entry_id is gone.
+    // Home Assistant strips the attributes of an unavailable entity, so proxy_token is gone.
     // @ts-expect-error Mocking minimal hass
     el.hass = {
       states: {
@@ -248,7 +248,7 @@ describe('skyline-webcams-card', () => {
       states: {
         'camera.test_cam': {
           state: 'idle',
-          attributes: { friendly_name: 'Test Cam', entry_id: 'abc123' },
+          attributes: { friendly_name: 'Test Cam', entry_id: 'abc123', proxy_token: 'tok-123' },
         },
       },
       callWS: () => Promise.resolve({ url: '/api/mock' }),
@@ -259,11 +259,29 @@ describe('skyline-webcams-card', () => {
     vi.advanceTimersByTime(1000);
     expect(startSpy).toHaveBeenCalled();
     // @ts-expect-error Testing private state
-    expect(el._streamUrl).toContain('/api/skylinewebcams_proxy/abc123.m3u8');
+    expect(el._streamUrl).toContain('/api/skylinewebcams_proxy/tok-123.m3u8');
 
     await el.updateComplete;
     expect(el.shadowRoot?.querySelector('.unavailable-overlay')).toBeNull();
   });
+  it('never points the proxy at the entry id, which no longer opens it', async () => {
+    el.setConfig({ entity: 'camera.test_cam' });
+    const callWS = vi.fn(() => Promise.resolve({ url: '/api/hls/core-token/master_playlist.m3u8' }));
+    // @ts-expect-error Mocking minimal hass
+    el.hass = {
+      states: {
+        'camera.test_cam': { state: 'idle', attributes: { friendly_name: 'Test Cam', entry_id: 'abc123' } },
+      },
+      callWS,
+    };
+    // @ts-expect-error Testing private method
+    await el._startStream();
+
+    expect(callWS).toHaveBeenCalledWith({ type: 'camera/stream', entity_id: 'camera.test_cam' });
+    // @ts-expect-error Testing private state
+    expect(el._streamUrl).toBe('/api/hls/core-token/master_playlist.m3u8');
+  });
+
   it('does not start a stream on a card that is scrolled out of view', async () => {
     vi.useFakeTimers();
     el.setConfig({ entity: 'camera.test_cam' });
@@ -287,7 +305,7 @@ describe('skyline-webcams-card', () => {
       states: {
         'camera.test_cam': {
           state: 'idle',
-          attributes: { friendly_name: 'Test Cam', entry_id: 'abc123' },
+          attributes: { friendly_name: 'Test Cam', entry_id: 'abc123', proxy_token: 'tok-123' },
         },
       },
       callWS: () => Promise.resolve({ url: '/api/mock' }),

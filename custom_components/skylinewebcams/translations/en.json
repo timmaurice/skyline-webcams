@@ -94,6 +94,9 @@
           },
           "entry_id": {
             "name": "Entry ID"
+          },
+          "proxy_token": {
+            "name": "Proxy token"
           }
         }
       }

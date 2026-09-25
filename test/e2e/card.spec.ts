@@ -5,8 +5,8 @@ const ENTITY = 'camera.e2e_card_webcam';
 
 /**
  * Mirrors what camera.py puts on the entity: `_additional_attributes` (source,
- * description, poster, country, region, place) plus the `entry_id` the card
- * needs to build its proxy URL. Writing the real shape here is the point of an
+ * description, poster, country, region, place) plus the `entry_id` and the
+ * `proxy_token` the card builds its proxy URL from. Writing the real shape here is the point of an
  * end-to-end test - an invented one would have passed while the card showed
  * nothing.
  */
@@ -19,6 +19,7 @@ const ATTRIBUTES = {
   region: 'Veneto',
   place: 'Venice',
   entry_id: 'e2e0000000000000000000000000e2e0',
+  proxy_token: 'e2e-card-proxy-token',
   entity_picture: '/api/camera_proxy/camera.e2e_card_webcam',
   supported_features: 2,
 };
@@ -80,7 +81,7 @@ test.describe('The card on a real dashboard', () => {
 
     await expect
       .poll(
-        () => requests.filter((url) => url.includes(`/api/skylinewebcams_proxy/${ATTRIBUTES.entry_id}.m3u8`)).length,
+        () => requests.filter((url) => url.includes(`/api/skylinewebcams_proxy/${ATTRIBUTES.proxy_token}.m3u8`)).length,
       )
       .toBeGreaterThan(0);
   });

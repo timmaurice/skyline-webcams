@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 import logging
 import re
 from collections.abc import Iterator
@@ -138,7 +139,7 @@ def _is_live(
 def async_running_cameras(
     hass: HomeAssistant,
 ) -> Iterator[tuple[str, SkylineWebcamsCamera]]:
-    """Every camera set up right now, with the key the proxy routes it by.
+    """Every camera set up right now, with the key it is kept under.
 
     The two paths keep their cameras in different places. A config entry
     carries its own in `runtime_data`, keyed by the entry id. A YAML camera has
@@ -155,19 +156,23 @@ def async_running_cameras(
 
 
 @callback
-def async_camera_for_key(hass: HomeAssistant, key: str) -> SkylineWebcamsCamera | None:
-    """Return the camera behind a proxy key, whichever path set it up.
+def async_camera_for_proxy_token(
+    hass: HomeAssistant, token: str
+) -> SkylineWebcamsCamera | None:
+    """Return the camera a proxy token belongs to, whichever path set it up.
 
-    The YAML cameras are looked at first: the key is only an entry id when it
-    is not one of theirs, and the two cannot clash - a URL hash is 32 hex
-    characters, an entry id is a 26 character ULID.
+    The proxy runs without authentication, so the token in its path is the
+    whole of the access check. It is not the entry id: that is no secret - it
+    names the diagnostics file, sits in the URLs of the integrations page and
+    never changes - and a YAML camera's key is a hash of its public URL.
+    Compared in constant time, and across every camera rather than by dict
+    lookup, so the time an answer takes says nothing about how close a guess
+    came. There are a handful of cameras at most. Bytes, not str: the path
+    arrives percent-decoded, and compare_digest raises on a non-ASCII str.
     """
-    if (camera := hass.data.get(DOMAIN, {}).get(key)) is not None:
-        return camera
-    entry = hass.config_entries.async_get_entry(key)
-    if entry is None or entry.domain != DOMAIN:
-        return None
-    # Gone once the entry unloads, which is what turns the proxy away from a
-    # camera that is no longer set up.
-    runtime_data = getattr(entry, "runtime_data", None)
-    return runtime_data.camera if runtime_data is not None else None
+    wanted = token.encode()
+    found = None
+    for _key, camera in async_running_cameras(hass):
+        if hmac.compare_digest(camera.proxy_token.encode(), wanted):
+            found = camera
+    return found

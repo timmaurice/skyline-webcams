@@ -11,6 +11,7 @@ const ATTRIBUTES = {
   region: 'Lazio',
   place: 'Rome',
   entry_id: 'e2e1111111111111111111111111e2e1',
+  proxy_token: 'e2e-unavailable-proxy-token',
 };
 
 const DASHBOARD = {
@@ -35,7 +36,7 @@ test.afterAll(async () => {
 
 test.describe('An unavailable camera', () => {
   test('says so instead of showing a silent black rectangle', async ({ page }) => {
-    // An unavailable camera loses every attribute, entry_id included, so the
+    // An unavailable camera loses every attribute, proxy_token included, so the
     // card cannot build a proxy URL. It used to sit there as a black box; it
     // now has to say what is wrong. Only a browser shows that.
     await page.goto(`/${urlPath}/0`);
@@ -69,7 +70,7 @@ test.describe('An unavailable camera', () => {
     await expect(card.locator('.video-container')).toBeVisible();
     await expect
       .poll(
-        () => requests.filter((url) => url.includes(`/api/skylinewebcams_proxy/${ATTRIBUTES.entry_id}.m3u8`)).length,
+        () => requests.filter((url) => url.includes(`/api/skylinewebcams_proxy/${ATTRIBUTES.proxy_token}.m3u8`)).length,
         { timeout: 30_000 },
       )
       .toBeGreaterThan(0);
