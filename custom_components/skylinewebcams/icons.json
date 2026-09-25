@@ -1,0 +1,9 @@
+{
+  "entity": {
+    "camera": {
+      "webcam": {
+        "default": "mdi:webcam"
+      }
+    }
+  }
+}

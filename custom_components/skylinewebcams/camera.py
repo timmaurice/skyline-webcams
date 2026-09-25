@@ -365,10 +365,11 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
 
     _attr_supported_features = CameraEntityFeature.STREAM
     _attr_frontend_stream_type = "hls"
-    _attr_icon = "mdi:webcam"
     # There is no fixed name to translate: a camera is called what the user
     # called it, the title of its entry or `name:` in YAML. The translation key
-    # carries the names of the state attributes instead.
+    # carries the names of the state attributes instead, and the icon: that
+    # lives in icons.json under the same key, and the frontend resolves it from
+    # the entity registry, so the state no longer carries an `icon` attribute.
     #
     # Switching has_entity_name on renames nothing that exists. Every camera
     # has a unique id, so its registry entry keeps the entity id it was given.
