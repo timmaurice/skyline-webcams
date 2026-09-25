@@ -12,6 +12,8 @@ import json
 import pathlib
 import re
 
+import yaml
+
 REPO = pathlib.Path(__file__).resolve().parents[1]
 COMPONENT = REPO / "custom_components" / "skylinewebcams"
 RELEASE_WORKFLOW = REPO / ".github" / "workflows" / "release.yml"
@@ -24,11 +26,20 @@ SHIPPABLE_SUFFIXES = {".py", ".json", ".js"}
 
 
 def zip_excludes() -> list[str]:
-    """The -x patterns the release workflow passes to zip."""
+    """The -x patterns the release workflow passes to zip.
+
+    The fleet-wide workflow keeps them in two lists: ZIP_EXCLUDE_ALWAYS on the
+    job, shared by every integration, and this repo's own ZIP_EXCLUDE in the
+    per-repo env block. The zip step passes both.
+    """
     text = RELEASE_WORKFLOW.read_text()
-    match = re.search(r"zip -r \.\./\.\./skylinewebcams\.zip \.(.*?)\n\n", text, re.S)
-    assert match, "could not find the zip step in the release workflow"
-    return re.findall(r'"([^"]+)"', match.group(1))
+    assert (
+        'lines "$ZIP_EXCLUDE_ALWAYS"; lines "$ZIP_EXCLUDE"' in text
+    ), "the zip step no longer passes both exclusion lists"
+    workflow = yaml.safe_load(text)
+    patterns = workflow["jobs"]["release"]["env"]["ZIP_EXCLUDE_ALWAYS"]
+    patterns += workflow["env"]["ZIP_EXCLUDE"]
+    return [line.strip() for line in patterns.splitlines() if line.strip()]
 
 
 def matches(pattern: str, path: str) -> bool:
