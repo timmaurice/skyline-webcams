@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Iterator
+from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 from homeassistant.components.camera import DOMAIN as CAMERA_DOMAIN
@@ -11,6 +13,9 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 
 from .const import DOMAIN
+
+if TYPE_CHECKING:
+    from .camera import SkylineWebcamsCamera
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -125,5 +130,44 @@ def _is_live(
         return hass.config_entries.async_get_entry(entry.config_entry_id) is not None
     return any(
         key != own_key and getattr(camera, "unique_id", None) == unique_id
-        for key, camera in hass.data.get(DOMAIN, {}).items()
+        for key, camera in async_running_cameras(hass)
     )
+
+
+@callback
+def async_running_cameras(
+    hass: HomeAssistant,
+) -> Iterator[tuple[str, SkylineWebcamsCamera]]:
+    """Every camera set up right now, with the key the proxy routes it by.
+
+    The two paths keep their cameras in different places. A config entry
+    carries its own in `runtime_data`, keyed by the entry id. A YAML camera has
+    no entry to hang it on, so the platform keeps those in `hass.data`, keyed by
+    a hash of the URL. Going through every entry rather than only the loaded
+    ones is deliberate: a camera exists from the moment its platform creates it,
+    while its entry is still setting up.
+    """
+    yield from hass.data.get(DOMAIN, {}).items()
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        runtime_data = getattr(entry, "runtime_data", None)
+        if runtime_data is not None and runtime_data.camera is not None:
+            yield entry.entry_id, runtime_data.camera
+
+
+@callback
+def async_camera_for_key(hass: HomeAssistant, key: str) -> SkylineWebcamsCamera | None:
+    """Return the camera behind a proxy key, whichever path set it up.
+
+    The YAML cameras are looked at first: the key is only an entry id when it
+    is not one of theirs, and the two cannot clash - a URL hash is 32 hex
+    characters, an entry id is a 26 character ULID.
+    """
+    if (camera := hass.data.get(DOMAIN, {}).get(key)) is not None:
+        return camera
+    entry = hass.config_entries.async_get_entry(key)
+    if entry is None or entry.domain != DOMAIN:
+        return None
+    # Gone once the entry unloads, which is what turns the proxy away from a
+    # camera that is no longer set up.
+    runtime_data = getattr(entry, "runtime_data", None)
+    return runtime_data.camera if runtime_data is not None else None

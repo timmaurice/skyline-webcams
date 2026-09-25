@@ -17,9 +17,9 @@ from collections import OrderedDict
 from homeassistant.components.camera import Camera, CameraEntityFeature
 from homeassistant.components.ffmpeg import async_get_image
 from homeassistant.components.http import HomeAssistantView
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_URL, CONF_NAME
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.network import NoURLAvailableError, get_url
@@ -28,8 +28,9 @@ import homeassistant.helpers.config_validation as cv
 from homeassistant.util.network import normalize_url
 import voluptuous as vol
 
+from . import SkylineConfigEntry
 from .const import DOMAIN
-from .helpers import async_migrated_unique_id
+from .helpers import async_camera_for_key, async_migrated_unique_id
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -97,6 +98,15 @@ PLATFORM_SCHEMA = cv.PLATFORM_SCHEMA.extend(
 
 
 def _init_domain_data(hass: HomeAssistant) -> None:
+    """Register the proxy view once, and make room for the YAML cameras.
+
+    This is the one piece of state that is not per entry. A view cannot be
+    unregistered, so it is set up by whichever path comes first and stays for
+    the rest of the run. The YAML cameras belong to no config entry, so there
+    is no `runtime_data` for them to live in: they stay in `hass.data`, keyed
+    by the hash of their URL. The presence of that dict is what says the view
+    is registered already.
+    """
     if DOMAIN not in hass.data:
         hass.data[DOMAIN] = {}
         hass.http.register_view(SkylineWebcamsHlsProxyView(hass))
@@ -130,16 +140,33 @@ async def async_setup_platform(
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: SkylineConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up SkylineWebcams camera from a config entry."""
     _init_domain_data(hass)
 
-    camera = SkylineWebcamsCamera(
-        hass, entry.data[CONF_URL], entry.title, entry.unique_id, entry.entry_id
+    # One device per entry, and an entry is one webcam, so this is a device per
+    # webcam as well. It is keyed on the entry id rather than the unique id:
+    # the unique id is the normalised URL, which the migration can still move,
+    # and a device keyed on it would be left behind when it does. YAML cameras
+    # get no device, Home Assistant only attaches one to an entry's entities.
+    device_info = DeviceInfo(
+        identifiers={(DOMAIN, entry.entry_id)},
+        name=entry.title,
+        manufacturer="SkylineWebcams",
+        entry_type=DeviceEntryType.SERVICE,
+        configuration_url=entry.data[CONF_URL],
     )
-    hass.data[DOMAIN][entry.entry_id] = camera
+    camera = SkylineWebcamsCamera(
+        hass,
+        entry.data[CONF_URL],
+        entry.title,
+        entry.unique_id,
+        entry.entry_id,
+        device_info=device_info,
+    )
+    entry.runtime_data.camera = camera
     async_add_entities([camera], True)
 
 
@@ -161,7 +188,7 @@ class SkylineWebcamsHlsProxyView(HomeAssistantView):
         elif entry_id.endswith(".ts"):
             entry_id = entry_id[:-3]
 
-        camera = self.hass.data.get(DOMAIN, {}).get(entry_id)
+        camera = async_camera_for_key(self.hass, entry_id)
         if not camera:
             return web.Response(status=404, text="Camera not found")
 
@@ -182,7 +209,7 @@ class SkylineWebcamsHlsProxyView(HomeAssistantView):
         if not is_allowed_stream_url(target_url):
             _LOGGER.warning(
                 "[%s] Refusing to proxy a URL outside %s",
-                camera.name,
+                camera.log_name,
                 ALLOWED_STREAM_HOST,
             )
             return web.Response(status=403, text="Stream host not allowed")
@@ -196,7 +223,7 @@ class SkylineWebcamsHlsProxyView(HomeAssistantView):
             if cached_data:
                 content_type, body_bytes = cached_data
                 _LOGGER.debug(
-                    "[%s] Serving cached TS chunk for %s", camera.name, target_url
+                    "[%s] Serving cached TS chunk for %s", camera.log_name, target_url
                 )
                 return web.Response(
                     body=body_bytes,
@@ -239,7 +266,7 @@ class SkylineWebcamsHlsProxyView(HomeAssistantView):
                         if not is_allowed_stream_url(target_url):
                             _LOGGER.warning(
                                 "[%s] Refusing to proxy a URL outside %s",
-                                camera.name,
+                                camera.log_name,
                                 ALLOWED_STREAM_HOST,
                             )
                             return web.Response(
@@ -270,7 +297,7 @@ class SkylineWebcamsHlsProxyView(HomeAssistantView):
                             if not is_allowed_stream_url(chunk_url):
                                 _LOGGER.warning(
                                     "[%s] Dropping playlist entry outside %s",
-                                    camera.name,
+                                    camera.log_name,
                                     ALLOWED_STREAM_HOST,
                                 )
                                 # Drop the tags that belong to the segment too,
@@ -329,7 +356,7 @@ class SkylineWebcamsHlsProxyView(HomeAssistantView):
                     await response.write_eof()
                     return response
         except Exception:
-            _LOGGER.exception("[%s] Error while proxying the stream", camera.name)
+            _LOGGER.exception("[%s] Error while proxying the stream", camera.log_name)
             return web.Response(status=502, text="Proxy error")
 
 
@@ -339,6 +366,17 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
     _attr_supported_features = CameraEntityFeature.STREAM
     _attr_frontend_stream_type = "hls"
     _attr_icon = "mdi:webcam"
+    # There is no fixed name to translate: a camera is called what the user
+    # called it, the title of its entry or `name:` in YAML. The translation key
+    # carries the names of the state attributes instead.
+    #
+    # Switching has_entity_name on renames nothing that exists. Every camera
+    # has a unique id, so its registry entry keeps the entity id it was given.
+    # A YAML camera has no device, and its friendly name is the entity name
+    # alone; an entry's camera has no name of its own and shows the device's,
+    # which is the entry title. Either way the same string as before.
+    _attr_has_entity_name = True
+    _attr_translation_key = "webcam"
 
     def __init__(
         self,
@@ -347,13 +385,24 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
         name: str,
         unique_id: str | None,
         entry_id: str,
+        device_info: DeviceInfo | None = None,
     ) -> None:
         """Initialize the camera."""
         super().__init__()
         self.hass = hass
         self._entry_id = entry_id
         self._url = url
-        self._attr_name = name
+        # What the log lines call this camera. The entity name cannot do that
+        # job: a camera with a device has none of its own, the device carries
+        # it.
+        self.log_name = name
+        if device_info is None:
+            self._attr_name = name
+        else:
+            # The main feature of its device, so the camera takes the device's
+            # name - which is the entry title, the name it had before.
+            self._attr_name = None
+            self._attr_device_info = device_info
         self._attr_unique_id = unique_id
         self._stream_url = None
         # -inf, not 0: the clock behind _is_cached is asyncio's monotonic one,
@@ -434,7 +483,7 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
     async def async_added_to_hass(self) -> None:
         """Run when entity is added to hass."""
         await super().async_added_to_hass()
-        _LOGGER.debug("[%s] Entity added to Home Assistant", self._attr_name)
+        _LOGGER.debug("[%s] Entity added to Home Assistant", self.log_name)
 
         if (old_state := await self.async_get_last_state()) is not None:
             for attr in ["description", "country", "region", "place", "poster"]:
@@ -448,7 +497,16 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
 
     async def async_will_remove_from_hass(self) -> None:
         """Run when entity will be removed from hass."""
-        self.hass.data.get(DOMAIN, {}).pop(self._entry_id, None)
+        # Taken out of wherever the proxy finds it, so a camera that has been
+        # removed is not streamed from any more - its entry may well still be
+        # loaded, when only the entity was deleted.
+        entry = self.platform.config_entry if self.platform else None
+        if entry is None:
+            self.hass.data.get(DOMAIN, {}).pop(self._entry_id, None)
+        elif (
+            runtime_data := getattr(entry, "runtime_data", None)
+        ) is not None and runtime_data.camera is self:
+            runtime_data.camera = None
         await super().async_will_remove_from_hass()
 
     @property
@@ -466,6 +524,33 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
         attrs = self._additional_attributes.copy()
         attrs["entry_id"] = self._entry_id
         return attrs
+
+    def as_diagnostics(self) -> dict:
+        """Return the state behind the camera, for diagnostics.
+
+        Unredacted: diagnostics.py decides what leaves the instance. This only
+        collects what explains a camera that does not play - whether it has a
+        stream URL and how old it is, and where the backoff stands.
+        """
+        now = asyncio.get_event_loop().time()
+        return {
+            "entity_id": self.entity_id,
+            "unique_id": self.unique_id,
+            "available": self._attr_available,
+            "attributes": self.extra_state_attributes,
+            "stream_url": self._stream_url,
+            "stream_url_age_seconds": (
+                round(now - self._last_update, 1) if self._stream_url else None
+            ),
+            "fetch_attempts": self._fetch_attempts,
+            "fetch_failures": self._fetch_failures,
+            "backoff_remaining_seconds": round(
+                max(self._retry_not_before - now, 0.0), 1
+            ),
+            "failure_logged": self._failure_logged,
+            "known_segments": len(self._segment_urls),
+            "cached_segments": len(self._ts_cache),
+        }
 
     @property
     def is_streaming(self) -> bool:
@@ -498,7 +583,7 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
                     return image_bytes
             except Exception as err:
                 _LOGGER.error(
-                    "[%s] Failed to capture image from stream: %s", self._attr_name, err
+                    "[%s] Failed to capture image from stream: %s", self.log_name, err
                 )
 
         poster_url = self._additional_attributes.get("poster")
@@ -512,7 +597,7 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
                     if response.status == 200:
                         return await response.read()
         except Exception as err:
-            _LOGGER.error("[%s] Failed to fetch camera image: %s", self._attr_name, err)
+            _LOGGER.error("[%s] Failed to fetch camera image: %s", self.log_name, err)
         return None
 
     async def stream_source(self) -> str | None:
@@ -527,14 +612,14 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
                 _LOGGER.warning(
                     "[%s] No URL to this Home Assistant instance and no HTTP "
                     "server config to fall back on; cannot provide a stream",
-                    self._attr_name,
+                    self.log_name,
                 )
                 return None
 
         proxy_url = f"{base_url}/api/skylinewebcams_proxy/{self._entry_id}.m3u8"
         _LOGGER.debug(
             "[%s] Providing proxy stream URL to HA worker: %s",
-            self._attr_name,
+            self.log_name,
             proxy_url,
         )
         return proxy_url
@@ -584,7 +669,7 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
         if not force and now < self._retry_not_before:
             _LOGGER.debug(
                 "[%s] Skipping stream URL fetch, backing off for another %.0fs",
-                self._attr_name,
+                self.log_name,
                 self._retry_not_before - now,
             )
             # The cached URL, same as the failure path below: it may be stale,
@@ -618,7 +703,7 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
             self._retry_not_before = asyncio.get_event_loop().time() + delay
             _LOGGER.debug(
                 "[%s] Stream URL fetch failed %d time(s), next attempt in %ds",
-                self._attr_name,
+                self.log_name,
                 self._fetch_failures,
                 delay,
             )
@@ -628,7 +713,7 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
     async def _fetch_stream_url(self) -> str | None:
         """Fetch the actual stream URL from the webcam page."""
         _LOGGER.debug(
-            "[%s] Fetching fresh stream URL from %s", self._attr_name, self._url
+            "[%s] Fetching fresh stream URL from %s", self.log_name, self._url
         )
 
         headers = {
@@ -643,7 +728,7 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
                     if response.status != 200:
                         self._log_fetch_failure(
                             "[%s] Webcam page answered %s",
-                            self._attr_name,
+                            self.log_name,
                             response.status,
                         )
                         self._attr_available = False
@@ -706,7 +791,7 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
 
                     if self._failure_logged:
                         _LOGGER.info(
-                            "[%s] Stream URL is reachable again", self._attr_name
+                            "[%s] Stream URL is reachable again", self.log_name
                         )
                         self._failure_logged = False
 
@@ -736,7 +821,7 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
         Returning None puts the caller on the backoff path, which is what keeps
         a camera whose page is broken from being scraped on every request.
         """
-        self._log_fetch_failure(message, self._attr_name, err)
+        self._log_fetch_failure(message, self.log_name, err)
         self._attr_available = False
         if self.entity_id:
             self.async_write_ha_state()

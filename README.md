@@ -107,6 +107,10 @@ If Home Assistant serves HTTPS itself (an `ssl_certificate` in its HTTP settings
 |          |                        | `poster`      | `https://static.skylinewebcams.com/..jpg` (still image from the webcam page)   |
 |          |                        | `entry_id`    | `1a2b3c..` (used by the bundled card to address the HLS proxy)                 |
 
+A camera added through the UI also gets a device of its own, a service named after the entry, and the camera takes its name from it: renaming the device renames the camera, while its entity ID stays. Cameras from YAML have no device, Home Assistant only gives devices to UI entries.
+
+For a camera that does not play, **Download diagnostics** on its entry reports whether it holds a stream URL, how old that is and where the retry backoff stands. The stream token and the entry ID are redacted, so the file can be attached to an issue.
+
 ### Lovelace Card
 
 This integration includes a dedicated custom Lovelace card: `custom:skyline-webcams-card`.
