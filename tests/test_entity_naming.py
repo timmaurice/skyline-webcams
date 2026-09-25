@@ -1,6 +1,7 @@
-"""Entity names with has_entity_name, and that existing entity ids survive it.
+"""Entity names, devices, and that existing entity ids survive both.
 
-Turning has_entity_name on changes how Home Assistant builds the name of a new
+Turning has_entity_name on, and giving an entry's camera a device whose name it
+shows instead of its own, changes how Home Assistant builds the name of a new
 entity. An existing one keeps its entity id, because the registry holds it
 under the unique id - which every camera of this integration has, from the
 config flow and from YAML alike. These tests set a camera up the way Home
@@ -11,7 +12,7 @@ The async cases run on pytest-asyncio in auto mode, configured in pytest.ini.
 
 from __future__ import annotations
 
-from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 
 from custom_components.skylinewebcams.const import CONF_URL, DOMAIN
 from custom_components.skylinewebcams.helpers import unique_id_for_url
@@ -33,7 +34,35 @@ async def test_a_new_camera_is_named_after_its_entry(hass, setup_entry):
     assert entity.entity_id == "camera.neuschwanstein"
     assert entity.has_entity_name is True
     assert entity.translation_key == "webcam"
+    # The main feature of its device: no name of its own, the device's shows.
+    assert entity.original_name is None
     assert hass.states.get("camera.neuschwanstein").name == "Neuschwanstein"
+
+
+async def test_an_entry_gets_one_service_device(hass, setup_entry):
+    entry = make_entry(hass)
+    await setup_entry(entry)
+
+    [device] = dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id)
+    assert device.identifiers == {(DOMAIN, entry.entry_id)}
+    assert device.entry_type is dr.DeviceEntryType.SERVICE
+    assert device.name == "Neuschwanstein"
+    assert device.manufacturer == "SkylineWebcams"
+    assert device.configuration_url == CAMERA_URL
+    [entity] = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
+    assert entity.device_id == device.id
+
+
+async def test_renaming_the_device_renames_the_camera_not_its_id(hass, setup_entry):
+    entry = make_entry(hass)
+    await setup_entry(entry)
+    devices = dr.async_get(hass)
+    [device] = dr.async_entries_for_config_entry(devices, entry.entry_id)
+
+    devices.async_update_device(device.id, name_by_user="Castle")
+    await hass.async_block_till_done()
+
+    assert hass.states.get("camera.neuschwanstein").name == "Castle"
 
 
 async def test_an_existing_camera_keeps_its_entity_id_and_name(hass, setup_entry):
@@ -61,8 +90,9 @@ async def test_an_existing_camera_keeps_its_entity_id_and_name(hass, setup_entry
     [entity] = er.async_entries_for_config_entry(registry, entry.entry_id)
     assert entity.entity_id == "camera.my_castle"
     assert entity.has_entity_name is True
-    # The name follows the entry title, as it did before: the camera was
-    # always set up with the title as its name.
+    # Now attached to the new device, and still called by the entry title: the
+    # camera always took the title as its name, and the device takes it now.
+    assert entity.device_id is not None
     assert hass.states.get("camera.my_castle").name == "Neuschwanstein Castle"
 
 
