@@ -42,18 +42,32 @@
         "data": {
           "url": "URL"
         }
+      },
+      "reconfigure": {
+        "title": "Change the webcam URL",
+        "description": "Enter the new URL of the SkylineWebcams page for {name}. The camera keeps its entity ID and its history.",
+        "data": {
+          "url": "URL"
+        },
+        "data_description": {
+          "url": "The full URL of the webcam page, as in the address bar of your browser."
+        }
       }
     },
     "error": {
       "cannot_connect": "Failed to connect to SkylineWebcams.",
       "invalid_url": "The URL does not look like a valid SkylineWebcams page.",
-      "no_items_found": "No cameras or sub-regions found at this location."
+      "no_items_found": "No cameras or sub-regions found at this location.",
+      "already_configured": "This webcam is already configured.",
+      "unknown": "Unexpected error occurred."
     },
     "abort": {
       "cannot_connect": "Failed to connect to SkylineWebcams.",
       "no_items_found": "No cameras found.",
       "already_configured": "Webcam is already configured",
-      "unknown": "Unexpected error occurred."
+      "unknown": "Unexpected error occurred.",
+      "reconfigure_successful": "The webcam now uses the new URL.",
+      "unknown_entry": "This webcam entry no longer exists."
     }
   },
   "entity": {
