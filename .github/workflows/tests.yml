@@ -7,9 +7,10 @@ on:
     branches: ['main', 'master']
 
 env:
-  # The oldest core this job is willing to call a valid run. It is not the
-  # oldest core the integration supports (hacs.json says 2024.7.0) - it is a
-  # tripwire. See the "Report and check the resolved core" step.
+  # The oldest core this job is willing to call a valid run, and so the oldest
+  # one hacs.json may declare: HACS must not offer the integration to a core
+  # this job never ran against. tests/test_packaging.py holds the two together.
+  # See the "Report and check the resolved core" step.
   MINIMUM_CORE: '2026.9.3'
 
 jobs:

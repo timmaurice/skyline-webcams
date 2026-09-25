@@ -15,17 +15,12 @@ import re
 REPO = pathlib.Path(__file__).resolve().parents[1]
 COMPONENT = REPO / "custom_components" / "skylinewebcams"
 RELEASE_WORKFLOW = REPO / ".github" / "workflows" / "release.yml"
+TESTS_WORKFLOW = REPO / ".github" / "workflows" / "tests.yml"
 
 # Everything a user needs at runtime: the integration itself, its translations
 # and the bundled card. The brand images belong to the HA brands repository,
 # not to a user's config folder.
 SHIPPABLE_SUFFIXES = {".py", ".json", ".js"}
-
-# hass.http.async_register_static_paths, which __init__ awaits during setup,
-# first shipped in core 2024.7.0; before it there is only the synchronous
-# register_static_path and setup raises. Without the floor HACS happily offers
-# the integration to a core it cannot start on.
-MINIMUM_CORE_VERSION = (2024, 7)
 
 
 def zip_excludes() -> list[str]:
@@ -146,8 +141,23 @@ def test_only_runtime_file_types_are_packaged():
     assert unexpected == []
 
 
-def test_hacs_declares_a_core_version_the_integration_can_actually_run_on():
-    hacs = json.loads((REPO / "hacs.json").read_text())
-    declared = tuple(int(part) for part in hacs["homeassistant"].split(".")[:2])
+def core_version(text: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in text.split("."))
 
-    assert declared >= MINIMUM_CORE_VERSION
+
+def ci_minimum_core() -> tuple[int, ...]:
+    """The oldest core the test workflow accepts as a valid run."""
+    match = re.search(r"MINIMUM_CORE: '([0-9.]+)'", TESTS_WORKFLOW.read_text())
+    assert match, "could not find MINIMUM_CORE in the test workflow"
+    return core_version(match.group(1))
+
+
+def test_hacs_offers_no_core_the_suite_never_ran_against():
+    """hacs.json is what HACS filters on, so it must not reach below CI.
+
+    It said 2024.7.0 - the floor for async_register_static_paths - while CI
+    ran on 2026.9.3 and nothing in between was ever tested.
+    """
+    hacs = json.loads((REPO / "hacs.json").read_text())
+
+    assert core_version(hacs["homeassistant"]) >= ci_minimum_core()
