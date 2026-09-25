@@ -12,7 +12,10 @@ from bs4 import BeautifulSoup
 import voluptuous as vol
 
 from homeassistant import config_entries
+from homeassistant.components.camera import DOMAIN as CAMERA_DOMAIN
+from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import DOMAIN, CONF_URL
@@ -23,6 +26,8 @@ _LOGGER = logging.getLogger(__name__)
 
 ALLOWED_HOST = "skylinewebcams.com"
 VALIDATE_TIMEOUT_SECONDS = 15
+# What validate_input names an entry whose page has no heading.
+DEFAULT_TITLE = "Skyline Webcam"
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
@@ -76,7 +81,7 @@ async def validate_input(hass, data):
         # get_text, not .string: a heading with a child tag has no .string,
         # which used to raise an AttributeError and show "unknown".
         title = h1_tag.get_text(" ", strip=True) if h1_tag else ""
-        return {"title": title or "Skyline Webcam"}
+        return {"title": title or DEFAULT_TITLE}
 
     except (aiohttp.ClientError, asyncio.TimeoutError):
         raise ValueError("cannot_connect")
@@ -191,6 +196,173 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="manual", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
         )
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Point an existing webcam entry at a different page.
+
+        The URL lives in the entry's data, which no options flow can write, so
+        a camera that moved used to mean deleting the entry and adding it
+        again - a new entity id, and the history, the cards and the automations
+        that named the old one left behind.
+
+        The new URL goes through the same checks the manual step runs, and the
+        entry is then updated and reloaded in place. Three things move with the
+        URL, because all three are derived from it: the entry's unique id, the
+        camera entity's unique id (see _async_move_camera_entity) and the
+        device's configuration URL. The device itself is keyed on the entry id
+        and stays as it is.
+        """
+        try:
+            entry = self._get_reconfigure_entry()
+        except config_entries.UnknownEntry:
+            # Deleted while the form was open: core aborts a reauth flow when
+            # its entry goes, but leaves a reconfigure flow running.
+            return self.async_abort(reason="unknown_entry")
+
+        errors: dict[str, str] = {}
+        url: str = entry.data[CONF_URL]
+        if user_input is not None:
+            url = user_input[CONF_URL]
+            try:
+                info = await validate_input(self.hass, user_input)
+                unique_id = unique_id_for_url(url)
+                if self._another_entry_has(entry, unique_id) or (
+                    self._camera_id_taken(entry, unique_id)
+                ):
+                    raise ValueError("already_configured")
+                title = await self._async_title_after_move(entry, url, info["title"])
+            except ValueError as error:
+                errors["base"] = str(error)
+            except Exception:  # pylint: disable=broad-except
+                _LOGGER.exception("Unexpected exception")
+                errors["base"] = "unknown"
+            else:
+                if self.hass.config_entries.async_get_entry(entry.entry_id) is None:
+                    # Deleted while the pages were being fetched.
+                    return self.async_abort(reason="unknown_entry")
+                # Nothing is awaited from here on, so the entity row and the
+                # entry move together or not at all. No update listener to do
+                # it: this reloads the entry, and the camera starts over on
+                # the new page straight away.
+                self._async_move_camera_entity(entry, unique_id)
+                return self.async_update_reload_and_abort(
+                    entry,
+                    unique_id=unique_id,
+                    title=title,
+                    data_updates={CONF_URL: url},
+                )
+
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=vol.Schema({vol.Required(CONF_URL, default=url): str}),
+            errors=errors,
+            description_placeholders={"name": entry.title},
+        )
+
+    def _another_entry_has(
+        self, entry: config_entries.ConfigEntry, unique_id: str
+    ) -> bool:
+        """Whether an entry other than `entry` already watches this camera.
+
+        The entry's own camera is fine: entering its URL again, or another
+        spelling of it (/de/ for /en/), is how a user reloads it or changes
+        the language of its page. Ignored entries count, so that the entry
+        cannot take over an id core would then hold twice. The stored URL is
+        checked as well as the unique id, for an entry that has not been
+        migrated onto the normalised id yet.
+        """
+        for other in self._async_current_entries(include_ignore=True):
+            if other.entry_id == entry.entry_id:
+                continue
+            if other.unique_id == unique_id:
+                return True
+            if (other_url := other.data.get(CONF_URL)) and unique_id_for_url(
+                other_url
+            ) == unique_id:
+                return True
+        return False
+
+    def _camera_id_taken(
+        self, entry: config_entries.ConfigEntry, unique_id: str
+    ) -> bool:
+        """Whether a camera row that is not this entry's holds the new id.
+
+        A YAML camera for that page, or one left behind by an earlier run.
+        Moving onto it is not possible, and letting the reload take it over
+        would hand this camera that row's entity id instead of its own. The
+        user can delete a leftover row under Settings > Entities and try again.
+        """
+        if unique_id == entry.unique_id:
+            return False
+        registry = er.async_get(self.hass)
+        entity_id = registry.async_get_entity_id(CAMERA_DOMAIN, DOMAIN, unique_id)
+        if entity_id is None:
+            return False
+        row = registry.async_get(entity_id)
+        return row is None or row.config_entry_id != entry.entry_id
+
+    @callback
+    def _async_move_camera_entity(
+        self, entry: config_entries.ConfigEntry, unique_id: str
+    ) -> None:
+        """Carry the entry's camera entity over to the new unique id.
+
+        The camera's unique id is the entry's, the normalised URL, and the
+        entity registry keys the entity on it. Reloading the entry with a new
+        one would register a second camera - `camera.<title>_2`, with no
+        history - and leave the old one behind as "no longer provided". Moving
+        the registry row instead keeps its entity id, its history and whatever
+        the user set on it, and the reloaded camera finds the row under its new
+        id. The row is moved rather than the camera given a stable id of its
+        own, because the normalised URL is also what recognises a YAML camera
+        and a UI entry for the same page as one camera, and what the unique id
+        migration of every existing camera is built on.
+        """
+        if unique_id == entry.unique_id:
+            return
+
+        registry = er.async_get(self.hass)
+        for row in er.async_entries_for_config_entry(registry, entry.entry_id):
+            if row.domain == CAMERA_DOMAIN and row.unique_id == entry.unique_id:
+                _LOGGER.debug(
+                    "Moving %s from unique id %s to %s",
+                    row.entity_id,
+                    row.unique_id,
+                    unique_id,
+                )
+                registry.async_update_entity(row.entity_id, new_unique_id=unique_id)
+
+    async def _async_title_after_move(
+        self, entry: config_entries.ConfigEntry, url: str, page_title: str
+    ) -> str:
+        """The entry's title once it watches `url`.
+
+        A title the user chose stays. One the flow chose - the heading of the
+        page it was added from, or the default for a page without one - is
+        replaced by the new page's heading, or the entry of a camera that moved
+        from Venice to Rome would go on being called Venice. The entry does not
+        record which kind its title is, so the old page is asked for its
+        heading; if it cannot be reached any more, the title is kept, which is
+        the safe side to be wrong on.
+        """
+        if entry.title == page_title:
+            return entry.title
+        if entry.title == DEFAULT_TITLE:
+            return page_title
+
+        old_url = entry.data[CONF_URL]
+        if old_url == url:
+            # The same page: it cannot say what it was called when it was
+            # added, only what it is called now, which is not the title.
+            return entry.title
+        try:
+            old_info = await validate_input(self.hass, {CONF_URL: old_url})
+        except Exception:  # noqa: BLE001 - only decides the title
+            _LOGGER.debug("Keeping the title of %s: %s is gone", entry.title, old_url)
+            return entry.title
+        return page_title if entry.title == old_info["title"] else entry.title
 
     async def async_step_continent(
         self, user_input: dict[str, Any] | None = None
