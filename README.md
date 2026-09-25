@@ -16,7 +16,7 @@ View [SkylineWebcams](https://www.skylinewebcams.com/) streams as native camera 
 - **Webcam Discovery**: Browse and find webcams by continent, country, and location.
 - **Dynamic Stream Extraction**: Automatically finds the current live stream URL.
 - **Token Management**: Handles authentication tokens for streams.
-- **Two Playback Paths**: The bundled Lovelace card plays the stream itself through the integration's own HLS proxy; everything else in Home Assistant (`more-info`, snapshots, `camera.record`) goes through the `stream` and `ffmpeg` components, which are handed the same proxy URL.
+- **Two Playback Paths**: The bundled Lovelace card plays the stream itself through the integration's own HLS proxy; everything else in Home Assistant (`more-info`, snapshots, `camera.record`) goes through the `stream` and `ffmpeg` components, which are handed the same proxy URL. The proxy runs without login, because neither the stream worker nor Safari's native player can send one; each camera's proxy URL carries a random token instead, which only a logged-in user can read off the camera's state and which changes on every restart.
 
 ## Installation
 
@@ -107,19 +107,20 @@ If Home Assistant serves HTTPS itself (an `ssl_certificate` in its HTTP settings
 
 ## Created Sensors
 
-| Sensor   | Description            | Attributes    | Example Value                                                                  |
-| :------- | :--------------------- | :------------ | :----------------------------------------------------------------------------- |
-| `camera` | The main camera entity | `description` | Panoramic view of Schwangau, the Neuschwanstein and the Hohenschwangau Castles |
-|          |                        | `country`     | Germany                                                                        |
-|          |                        | `region`      | Bavaria                                                                        |
-|          |                        | `place`       | Schwangau                                                                      |
-|          |                        | `source`      | `https://www.skylinewebcams.com/..`                                            |
-|          |                        | `poster`      | `https://static.skylinewebcams.com/..jpg` (still image from the webcam page)   |
-|          |                        | `entry_id`    | `1a2b3c..` (used by the bundled card to address the HLS proxy)                 |
+| Sensor   | Description            | Attributes    | Example Value                                                                                          |
+| :------- | :--------------------- | :------------ | :----------------------------------------------------------------------------------------------------- |
+| `camera` | The main camera entity | `description` | Panoramic view of Schwangau, the Neuschwanstein and the Hohenschwangau Castles                         |
+|          |                        | `country`     | Germany                                                                                                |
+|          |                        | `region`      | Bavaria                                                                                                |
+|          |                        | `place`       | Schwangau                                                                                              |
+|          |                        | `source`      | `https://www.skylinewebcams.com/..`                                                                    |
+|          |                        | `poster`      | `https://static.skylinewebcams.com/..jpg` (still image from the webcam page)                           |
+|          |                        | `entry_id`    | `1a2b3c..` (the camera's config entry)                                                                 |
+|          |                        | `proxy_token` | random, new on every restart (what the bundled card opens the HLS proxy with; not recorded in history) |
 
 A camera added through the UI also gets a device of its own, a service named after the entry, and the camera takes its name from it: renaming the device renames the camera, while its entity ID stays. Cameras from YAML have no device, Home Assistant only gives devices to UI entries.
 
-For a camera that does not play, **Download diagnostics** on its entry reports whether it holds a stream URL, how old that is and where the retry backoff stands. The stream token is redacted, and so is the entry ID wherever the integration reports it. Home Assistant itself names the file after the entry and lists the entry's setup time under its ID, so rename the file and remove that `setup_times` line before attaching it to a public issue.
+For a camera that does not play, **Download diagnostics** on its entry reports whether it holds a stream URL, how old that is and where the retry backoff stands. The stream token, the proxy token and the entry ID are redacted wherever the integration reports them. Home Assistant itself names the file after the entry and lists the entry's setup time under its ID. The entry ID no longer opens the stream proxy, but if you would rather not publish it, rename the file and remove that `setup_times` line before attaching it to a public issue.
 
 ### Lovelace Card
 
