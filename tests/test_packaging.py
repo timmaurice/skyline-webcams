@@ -68,6 +68,7 @@ RUNTIME_TREE = [
     "camera.py",
     "config_flow.py",
     "helpers.py",
+    "icons.json",
     "manifest.json",
     "skyline-webcams-card.js",
     "translations/de.json",
@@ -129,6 +130,7 @@ def test_the_real_folder_still_ships_what_the_integration_needs():
     assert "manifest.json" in packaged
     assert "camera.py" in packaged
     assert "helpers.py" in packaged
+    assert "icons.json" in packaged
     assert "skyline-webcams-card.js" in packaged
 
 
