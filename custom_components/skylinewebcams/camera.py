@@ -525,6 +525,33 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
         attrs["entry_id"] = self._entry_id
         return attrs
 
+    def as_diagnostics(self) -> dict:
+        """Return the state behind the camera, for diagnostics.
+
+        Unredacted: diagnostics.py decides what leaves the instance. This only
+        collects what explains a camera that does not play - whether it has a
+        stream URL and how old it is, and where the backoff stands.
+        """
+        now = asyncio.get_event_loop().time()
+        return {
+            "entity_id": self.entity_id,
+            "unique_id": self.unique_id,
+            "available": self._attr_available,
+            "attributes": self.extra_state_attributes,
+            "stream_url": self._stream_url,
+            "stream_url_age_seconds": (
+                round(now - self._last_update, 1) if self._stream_url else None
+            ),
+            "fetch_attempts": self._fetch_attempts,
+            "fetch_failures": self._fetch_failures,
+            "backoff_remaining_seconds": round(
+                max(self._retry_not_before - now, 0.0), 1
+            ),
+            "failure_logged": self._failure_logged,
+            "known_segments": len(self._segment_urls),
+            "cached_segments": len(self._ts_cache),
+        }
+
     @property
     def is_streaming(self) -> bool:
         """Return true if the camera is streaming."""
