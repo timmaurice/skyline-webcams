@@ -17,7 +17,6 @@ from collections import OrderedDict
 from homeassistant.components.camera import Camera, CameraEntityFeature
 from homeassistant.components.ffmpeg import async_get_image
 from homeassistant.components.http import HomeAssistantView
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_URL, CONF_NAME
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -28,8 +27,9 @@ import homeassistant.helpers.config_validation as cv
 from homeassistant.util.network import normalize_url
 import voluptuous as vol
 
+from . import SkylineConfigEntry
 from .const import DOMAIN
-from .helpers import async_migrated_unique_id
+from .helpers import async_camera_for_key, async_migrated_unique_id
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -97,6 +97,15 @@ PLATFORM_SCHEMA = cv.PLATFORM_SCHEMA.extend(
 
 
 def _init_domain_data(hass: HomeAssistant) -> None:
+    """Register the proxy view once, and make room for the YAML cameras.
+
+    This is the one piece of state that is not per entry. A view cannot be
+    unregistered, so it is set up by whichever path comes first and stays for
+    the rest of the run. The YAML cameras belong to no config entry, so there
+    is no `runtime_data` for them to live in: they stay in `hass.data`, keyed
+    by the hash of their URL. The presence of that dict is what says the view
+    is registered already.
+    """
     if DOMAIN not in hass.data:
         hass.data[DOMAIN] = {}
         hass.http.register_view(SkylineWebcamsHlsProxyView(hass))
@@ -130,7 +139,7 @@ async def async_setup_platform(
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: SkylineConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up SkylineWebcams camera from a config entry."""
@@ -139,7 +148,7 @@ async def async_setup_entry(
     camera = SkylineWebcamsCamera(
         hass, entry.data[CONF_URL], entry.title, entry.unique_id, entry.entry_id
     )
-    hass.data[DOMAIN][entry.entry_id] = camera
+    entry.runtime_data.camera = camera
     async_add_entities([camera], True)
 
 
@@ -161,7 +170,7 @@ class SkylineWebcamsHlsProxyView(HomeAssistantView):
         elif entry_id.endswith(".ts"):
             entry_id = entry_id[:-3]
 
-        camera = self.hass.data.get(DOMAIN, {}).get(entry_id)
+        camera = async_camera_for_key(self.hass, entry_id)
         if not camera:
             return web.Response(status=404, text="Camera not found")
 
@@ -448,7 +457,16 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
 
     async def async_will_remove_from_hass(self) -> None:
         """Run when entity will be removed from hass."""
-        self.hass.data.get(DOMAIN, {}).pop(self._entry_id, None)
+        # Taken out of wherever the proxy finds it, so a camera that has been
+        # removed is not streamed from any more - its entry may well still be
+        # loaded, when only the entity was deleted.
+        entry = self.platform.config_entry if self.platform else None
+        if entry is None:
+            self.hass.data.get(DOMAIN, {}).pop(self._entry_id, None)
+        elif (
+            runtime_data := getattr(entry, "runtime_data", None)
+        ) is not None and runtime_data.camera is self:
+            runtime_data.camera = None
         await super().async_will_remove_from_hass()
 
     @property

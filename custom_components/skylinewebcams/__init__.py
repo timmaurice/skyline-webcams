@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
@@ -11,12 +14,31 @@ from .const import DOMAIN, CONF_URL
 from .helpers import async_migrated_unique_id
 import homeassistant.helpers.config_validation as cv
 
+if TYPE_CHECKING:
+    from .camera import SkylineWebcamsCamera
+
 _LOGGER = logging.getLogger(__name__)
 PLATFORMS: list[Platform] = [Platform.CAMERA]
 
 import voluptuous as vol
 
 CONFIG_SCHEMA = vol.Schema({DOMAIN: vol.Schema({})}, extra=vol.ALLOW_EXTRA)
+
+
+@dataclass
+class SkylineRuntimeData:
+    """What a loaded entry carries: the camera its platform set up.
+
+    The camera is an entity, so the platform creates it and fills it in here;
+    the entry starts out with an empty slot. The HLS proxy finds an entry's
+    camera through this, and Home Assistant drops it when the entry unloads, so
+    an unloaded entry cannot be streamed from any more.
+    """
+
+    camera: SkylineWebcamsCamera | None = None
+
+
+type SkylineConfigEntry = ConfigEntry[SkylineRuntimeData]
 
 CARD_FILENAME = "skyline-webcams-card.js"
 CARD_URL_PREFIX = "/skylinewebcams_frontend/"
@@ -145,12 +167,13 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_setup_entry(hass: HomeAssistant, entry: SkylineConfigEntry) -> bool:
     """Set up SkylineWebcams from a config entry."""
+    entry.runtime_data = SkylineRuntimeData()
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: SkylineConfigEntry) -> bool:
     """Unload a config entry."""
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
