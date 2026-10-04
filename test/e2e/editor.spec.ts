@@ -11,6 +11,7 @@ const ATTRIBUTES = {
   region: 'Veneto',
   place: 'Venice',
   entry_id: 'e2e2222222222222222222222222e2e2',
+  proxy_token: 'e2e-editor-proxy-token',
   supported_features: 2,
 };
 

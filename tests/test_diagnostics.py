@@ -46,7 +46,7 @@ async def test_diagnostics_describe_the_camera(hass, setup_entry):
 
 
 async def test_diagnostics_leave_out_what_opens_the_stream(hass, setup_entry):
-    """The signed stream URL, and the entry id the unauthenticated proxy keys on."""
+    """The signed stream URL, the proxy token, and the entry id."""
     entry = make_entry(hass)
     await setup_entry(entry)
     assert entry.runtime_data.camera._stream_url == STREAM_URL
@@ -57,6 +57,9 @@ async def test_diagnostics_leave_out_what_opens_the_stream(hass, setup_entry):
     assert "secret-token" not in dumped
     assert entry.entry_id not in dumped
     assert diagnostics["camera"]["attributes"]["entry_id"] == REDACTED
+    # The token is what opens the unauthenticated proxy.
+    assert entry.runtime_data.camera.proxy_token not in dumped
+    assert diagnostics["camera"]["attributes"]["proxy_token"] == REDACTED
 
 
 async def test_diagnostics_of_an_unloaded_entry(hass, setup_entry):

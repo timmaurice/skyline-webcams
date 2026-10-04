@@ -30,7 +30,7 @@ import voluptuous as vol
 
 from . import SkylineConfigEntry
 from .const import DOMAIN
-from .helpers import async_camera_for_key, async_migrated_unique_id
+from .helpers import async_camera_for_proxy_token, async_migrated_unique_id
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -129,7 +129,9 @@ async def async_setup_platform(
     # The same normalised id the config entries use, so a camera configured in
     # YAML and the same camera added through the UI are recognised as one. The
     # entity keeps its registry entry: the id is migrated, not replaced.
-    # For YAML, we use a hash of the URL as the entry_id for safe proxy routing
+    # For YAML, a hash of the URL stands in for the entry id. It is the key the
+    # camera is kept under, not what the proxy checks: it is derived from a
+    # public URL.
     entry_id = hashlib.md5(url.encode()).hexdigest()
     unique_id = async_migrated_unique_id(hass, url, url, entry_id)
 
@@ -171,9 +173,18 @@ async def async_setup_entry(
 
 
 class SkylineWebcamsHlsProxyView(HomeAssistantView):
-    """View to proxy HLS stream directly to bypass Referer checks."""
+    """View to proxy HLS stream directly to bypass Referer checks.
 
-    url = "/api/skylinewebcams_proxy/{entry_id}"
+    Served without authentication, because neither of its two clients can
+    authenticate: Home Assistant's stream worker opens the playlist through
+    FFmpeg with no credentials, and Safari plays it natively from a <video>
+    src, which cannot carry a bearer header. Core's own HLS views work the same
+    way. What opens a camera's stream instead is its proxy token, a random
+    secret in the path that only an authenticated user can read off the
+    camera's state (the same trust as core's `access_token` attribute).
+    """
+
+    url = "/api/skylinewebcams_proxy/{token}"
     name = "api:skylinewebcams_proxy"
     requires_auth = False
 
@@ -181,14 +192,14 @@ class SkylineWebcamsHlsProxyView(HomeAssistantView):
         """Initialize the view."""
         self.hass = hass
 
-    async def get(self, request: web.Request, entry_id: str) -> web.Response:
+    async def get(self, request: web.Request, token: str) -> web.Response:
         """Handle GET request to proxy the stream."""
-        if entry_id.endswith(".m3u8"):
-            entry_id = entry_id[:-5]
-        elif entry_id.endswith(".ts"):
-            entry_id = entry_id[:-3]
+        if token.endswith(".m3u8"):
+            token = token[:-5]
+        elif token.endswith(".ts"):
+            token = token[:-3]
 
-        camera = async_camera_for_key(self.hass, entry_id)
+        camera = async_camera_for_proxy_token(self.hass, token)
         if not camera:
             return web.Response(status=404, text="Camera not found")
 
@@ -311,9 +322,10 @@ class SkylineWebcamsHlsProxyView(HomeAssistantView):
                                 ):
                                     rewritten_lines.pop()
                                 continue
-                            token = camera.register_segment_url(chunk_url)
+                            seg = camera.register_segment_url(chunk_url)
                             rewritten_lines.append(
-                                f"/api/skylinewebcams_proxy/{entry_id}.ts?seg={token}"
+                                f"/api/skylinewebcams_proxy/{camera.proxy_token}.ts"
+                                f"?seg={seg}"
                             )
                         else:
                             rewritten_lines.append(line)
@@ -378,6 +390,8 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
     # which is the entry title. Either way the same string as before.
     _attr_has_entity_name = True
     _attr_translation_key = "webcam"
+    # Core leaves its own access_token out of the history for the same reason.
+    _unrecorded_attributes = frozenset({"proxy_token"})
 
     def __init__(
         self,
@@ -437,6 +451,11 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
         self._segment_urls: OrderedDict[str, str] = OrderedDict()
         self._segment_capacity = 256
         self._segment_secret = secrets.token_bytes(32)
+        # The capability the unauthenticated proxy checks, in place of the entry
+        # id it used to route by. New on every run and every reload, and kept
+        # nowhere: a token that leaked stops working with the next restart, and
+        # the recorder does not store it (see _unrecorded_attributes).
+        self.proxy_token = secrets.token_urlsafe(32)
 
     def get_session(self):
         if not self._session:
@@ -524,6 +543,8 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
         """Return the state attributes."""
         attrs = self._additional_attributes.copy()
         attrs["entry_id"] = self._entry_id
+        # What the card builds the proxy URL from.
+        attrs["proxy_token"] = self.proxy_token
         return attrs
 
     def as_diagnostics(self) -> dict:
@@ -617,13 +638,13 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
                 )
                 return None
 
-        proxy_url = f"{base_url}/api/skylinewebcams_proxy/{self._entry_id}.m3u8"
+        # Logged without the token: a debug log is what ends up in an issue.
         _LOGGER.debug(
-            "[%s] Providing proxy stream URL to HA worker: %s",
+            "[%s] Providing the proxy stream on %s to HA worker",
             self.log_name,
-            proxy_url,
+            base_url,
         )
-        return proxy_url
+        return f"{base_url}/api/skylinewebcams_proxy/{self.proxy_token}.m3u8"
 
     async def get_fresh_stream_url(self, force: bool = False) -> str | None:
         """Get a fresh URL, caching it for 2 minutes to avoid rate limits.

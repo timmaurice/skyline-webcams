@@ -17,7 +17,9 @@ from homeassistant.helpers.network import NoURLAvailableError, get_url
 
 from custom_components.skylinewebcams.camera import SkylineWebcamsCamera
 
-PROXY_PATH = "/api/skylinewebcams_proxy/cam1.m3u8"
+
+def proxy_path(camera):
+    return f"/api/skylinewebcams_proxy/{camera.proxy_token}.m3u8"
 
 
 def make_camera(hass):
@@ -60,8 +62,9 @@ async def test_fallback_follows_the_running_http_server(
     hass, port, use_ssl, expected_base
 ):
     serve_on(hass, port, use_ssl)
+    camera = make_camera(hass)
 
-    assert await make_camera(hass).stream_source() == expected_base + PROXY_PATH
+    assert await camera.stream_source() == expected_base + proxy_path(camera)
 
 
 async def test_no_http_server_config_yields_no_stream_instead_of_a_guess(hass):
@@ -75,8 +78,26 @@ async def test_no_http_server_config_yields_no_stream_instead_of_a_guess(hass):
 async def test_a_known_internal_url_is_used_as_is(hass):
     hass.config.api = ApiConfig("127.0.0.1", "127.0.0.1", 80, False)
     hass.config.internal_url = "http://homeassistant.local:8125"
+    camera = make_camera(hass)
 
     assert (
-        await make_camera(hass).stream_source()
-        == "http://homeassistant.local:8125" + PROXY_PATH
+        await camera.stream_source()
+        == "http://homeassistant.local:8125" + proxy_path(camera)
     )
+
+
+async def test_the_worker_is_given_the_token_not_the_entry_id(hass, caplog):
+    """The worker cannot authenticate, so the token is what lets it in.
+
+    And the debug line that announces the URL leaves the token out: a debug log
+    is what gets pasted into an issue.
+    """
+    hass.config.internal_url = "http://homeassistant.local:8125"
+    camera = make_camera(hass)
+
+    with caplog.at_level("DEBUG", logger="custom_components.skylinewebcams"):
+        source = await camera.stream_source()
+
+    assert camera.proxy_token in source
+    assert "cam1" not in source
+    assert camera.proxy_token not in caplog.text

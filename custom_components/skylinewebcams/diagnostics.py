@@ -10,12 +10,12 @@ from homeassistant.core import HomeAssistant
 
 from . import SkylineConfigEntry
 
-# The HLS proxy is served without authentication and routed by the entry id, so
-# the id is all it takes to pull a stream through this instance. A diagnostics
-# file ends up attached to a public issue. Home Assistant still names the file
-# after the entry, which this cannot change - but the content does not have to
-# repeat it.
-TO_REDACT = {"entry_id"}
+# The HLS proxy is served without authentication, and the proxy token is all it
+# takes to pull a stream through this instance. A diagnostics file ends up
+# attached to a public issue. The entry id no longer opens anything - Home
+# Assistant names the file after it, which is why the proxy stopped routing by
+# it - but there is no reason for the content to repeat it either.
+TO_REDACT = {"entry_id", "proxy_token"}
 
 
 def redact_url_query(url: str | None) -> str | None:
