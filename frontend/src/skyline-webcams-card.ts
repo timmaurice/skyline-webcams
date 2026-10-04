@@ -64,6 +64,7 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
   @state() private _streamUrl?: string;
   @state() private _isIntersecting = false;
   @state() private _unavailable = false;
+  @state() private _offline = false;
 
   @query('video') private _videoEl?: HTMLVideoElement;
 
@@ -166,7 +167,8 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
       changedProps.has('_loading') ||
       changedProps.has('_streamUrl') ||
       changedProps.has('_isIntersecting') ||
-      changedProps.has('_unavailable')
+      changedProps.has('_unavailable') ||
+      changedProps.has('_offline')
     ) {
       return true;
     }
@@ -205,27 +207,45 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
   }
 
   /**
-   * Keeps the card in step with the availability of its camera.
+   * Whether the webcam is switched off on SkylineWebcams.
+   *
+   * Its page still answers, so the camera stays available - but there is no
+   * stream behind it, and the poster has LIVE printed on it. The integration
+   * reads the page and says so in the `offline` attribute.
+   */
+  private _isOffline(stateObj?: HassEntity): boolean {
+    return !this._isUnavailable(stateObj) && stateObj?.attributes.offline === true;
+  }
+
+  /**
+   * Keeps the card in step with the availability of its camera, and with
+   * whether the webcam is broadcasting at all.
    *
    * An unavailable camera has no attributes left, so the card cannot build a
-   * proxy URL and used to sit there as a silent black rectangle. Say so
-   * instead, and pick the stream up again by itself once the entity returns.
+   * proxy URL and used to sit there as a silent black rectangle. An offline
+   * webcam has nothing to stream, and the card used to show its LIVE poster as
+   * if it were about to play. Say so instead, in both cases, and pick the
+   * stream up again by itself once the camera is back.
    */
   private _syncAvailability(): void {
     if (!this.hass || !this._config?.entity) return;
 
-    const unavailable = this._isUnavailable(this.hass.states[this._config.entity]);
-    if (unavailable === this._unavailable) return;
+    const stateObj = this.hass.states[this._config.entity];
+    const unavailable = this._isUnavailable(stateObj);
+    const offline = this._isOffline(stateObj);
+    if (unavailable === this._unavailable && offline === this._offline) return;
+    const wasBlocked = this._unavailable || this._offline;
     this._unavailable = unavailable;
+    this._offline = offline;
 
-    if (unavailable) {
+    if (unavailable || offline) {
       // Nothing to play and nothing to retry against, so stop rather than let
       // the player run into errors it cannot recover from.
       this._destroyHls();
       this._error = undefined;
-    } else {
+    } else if (wasBlocked) {
       // Back again. The delay so far was earned by stream errors, not by this
-      // camera being offline, so start from the short delay again - otherwise
+      // camera being away, so start from the short delay again - otherwise
       // a camera that flapped a few times stays black for the full 30s.
       this._restartAttempts = 0;
       // Go through the same backoff timer the stream errors use, so a camera
@@ -237,7 +257,7 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
   private _updatePlaybackState(): void {
     const shouldPlay = document.visibilityState === 'visible' && this._isIntersecting;
     if (shouldPlay) {
-      if (!this._hls && !this._loading && !this._error && this.hass && this._config?.entity) {
+      if (!this._hls && !this._loading && !this._error && !this._offline && this.hass && this._config?.entity) {
         console.debug('skyline-webcams-card: active and in viewport, starting stream');
         this._startStream();
       }
@@ -301,6 +321,16 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
         // the availability watcher restarts us when the camera is back.
         console.debug(`skyline-webcams-card: ${this._config.entity} is unavailable, not starting a stream`);
         this._unavailable = true;
+        this._loading = false;
+        this.requestUpdate();
+        return;
+      }
+
+      if (this._isOffline(stateObj)) {
+        // Nothing is broadcast, so there is nothing for the proxy to fetch.
+        // The watcher starts the stream once the webcam is back.
+        console.debug(`skyline-webcams-card: ${this._config.entity} is offline, not starting a stream`);
+        this._offline = true;
         this._loading = false;
         this.requestUpdate();
         return;
@@ -459,7 +489,7 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
       // scrolled out of view or whose camera is unavailable must not open a
       // stream nobody is watching - whatever brings it back (visibility,
       // intersection, the entity returning) starts it then.
-      if (this._unavailable || document.visibilityState !== 'visible' || !this._isIntersecting) {
+      if (this._unavailable || this._offline || document.visibilityState !== 'visible' || !this._isIntersecting) {
         return;
       }
       this._startStream();
@@ -591,7 +621,21 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
             : ''
         }
         <div class="card-content">
-          <div class="video-container" style="aspect-ratio: ${this._config.aspect_ratio || '16/9'};">
+          <div
+            class="video-container ${this._offline ? 'offline' : ''}"
+            style="aspect-ratio: ${this._config.aspect_ratio || '16/9'};"
+          >
+            ${
+              this._offline
+                ? html`
+                    <div class="overlay offline-overlay" role="status">
+                      <ha-icon icon="mdi:webcam-off"></ha-icon>
+                      <p class="offline-title">${localize(this.hass, 'card.webcam_offline')}</p>
+                      <p class="offline-msg">${localize(this.hass, 'card.webcam_offline_detail')}</p>
+                    </div>
+                  `
+                : ''
+            }
             ${
               this._unavailable
                 ? html`
@@ -635,7 +679,7 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
             ></video>
 
             ${
-              this._config.show_video_controls !== false
+              this._config.show_video_controls !== false && !this._offline
                 ? html`
                     <div class="video-controls" @click=${(e: Event) => e.stopPropagation()}>
                       <button

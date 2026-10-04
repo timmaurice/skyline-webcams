@@ -292,3 +292,37 @@ video {
 .spacer {
   flex-grow: 1;
 }
+
+// A webcam that is switched off on SkylineWebcams. The poster stays, dimmed,
+// so the card still shows which webcam it is - but it has LIVE printed on it,
+// so the overlay has to say plainly that nothing is being broadcast.
+.video-container.offline video {
+  opacity: 0.35;
+  filter: grayscale(0.6);
+}
+
+.offline-overlay {
+  background: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  padding: 20px;
+  text-align: center;
+  gap: 4px;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+
+  ha-icon {
+    --mdc-icon-size: 40px;
+    margin-bottom: 4px;
+  }
+}
+
+.offline-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.offline-msg {
+  font-size: 0.9rem;
+  margin: 0;
+  opacity: 0.9;
+}

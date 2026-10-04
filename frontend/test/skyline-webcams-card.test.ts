@@ -264,6 +264,131 @@ describe('skyline-webcams-card', () => {
     await el.updateComplete;
     expect(el.shadowRoot?.querySelector('.unavailable-overlay')).toBeNull();
   });
+  const OFFLINE_CAM = {
+    state: 'idle',
+    attributes: {
+      friendly_name: 'Rome - Pantheon',
+      place: 'Rome',
+      region: 'Lazio',
+      country: 'Italy',
+      description: 'View of the Pantheon',
+      source: 'https://www.skylinewebcams.com/en/webcam/italia/lazio/roma/pantheon.html',
+      poster: 'https://cdn.skylinewebcams.com/social165.jpg',
+      entry_id: 'abc123',
+      proxy_token: 'tok-123',
+      offline: true,
+    },
+  };
+
+  it('says the webcam is offline instead of playing it', async () => {
+    el.setConfig({ entity: 'camera.test_cam', show_link: true });
+    const callWS = vi.fn(() => Promise.resolve({ url: '/api/mock' }));
+    // @ts-expect-error Mocking minimal hass
+    el.hass = { states: { 'camera.test_cam': OFFLINE_CAM }, callWS };
+    await el.updateComplete;
+
+    const overlay = el.shadowRoot?.querySelector('.offline-overlay');
+    expect(overlay).not.toBeNull();
+    // Real text, not only an icon: a screen reader has to be able to say it.
+    expect(overlay?.getAttribute('role')).toBe('status');
+    expect(overlay?.querySelector('.offline-title')?.textContent?.trim()).toBe('Webcam offline');
+    expect(overlay?.querySelector('.offline-msg')?.textContent?.trim()).toBe(
+      'It is not broadcasting on SkylineWebcams right now.',
+    );
+    // The poster stays, dimmed, and so does everything around the video.
+    expect(el.shadowRoot?.querySelector('.video-container.offline')).not.toBeNull();
+    expect(el.shadowRoot?.querySelector('video')?.getAttribute('poster')).toBe(OFFLINE_CAM.attributes.poster);
+    expect(el.shadowRoot?.querySelector('.webcam-title')?.textContent?.trim()).toBe('Rome - Pantheon');
+    expect(el.shadowRoot?.querySelector('.webcam-location')?.textContent).toContain('Rome, Lazio, Italy');
+    expect(el.shadowRoot?.querySelector('.webcam-description')).not.toBeNull();
+    expect(el.shadowRoot?.querySelector('.webcam-source-link')).not.toBeNull();
+    // A play button for a stream that is not there would only invite a click.
+    expect(el.shadowRoot?.querySelector('.video-controls')).toBeNull();
+    expect(el.shadowRoot?.querySelector('.unavailable-overlay')).toBeNull();
+
+    // On screen and visible: whatever would start the stream, it must not.
+    // @ts-expect-error Testing private method
+    const initSpy = vi.spyOn(el, '_initHls');
+    // @ts-expect-error Testing private state
+    el._isIntersecting = true;
+    // @ts-expect-error Testing private method
+    el._updatePlaybackState();
+    // @ts-expect-error Testing private method
+    await el._startStream();
+    await el.updateComplete;
+
+    expect(initSpy).not.toHaveBeenCalled();
+    expect(callWS).not.toHaveBeenCalled();
+    // @ts-expect-error Testing private state
+    expect(el._streamUrl).toBeUndefined();
+    // @ts-expect-error Testing private state
+    expect(el._loading).toBe(false);
+    expect(el.shadowRoot?.querySelector('.loading-overlay')).toBeNull();
+  });
+
+  it('localizes the offline overlay', async () => {
+    el.setConfig({ entity: 'camera.test_cam' });
+    // @ts-expect-error Mocking minimal hass
+    el.hass = { language: 'de', states: { 'camera.test_cam': OFFLINE_CAM }, callWS: vi.fn() };
+    await el.updateComplete;
+
+    expect(el.shadowRoot?.querySelector('.offline-title')?.textContent?.trim()).toBe('Webcam offline');
+    expect(el.shadowRoot?.querySelector('.offline-msg')?.textContent?.trim()).toBe(
+      'Sie sendet gerade nicht auf SkylineWebcams.',
+    );
+  });
+
+  it('stops a playing stream when the webcam goes offline', async () => {
+    el.setConfig({ entity: 'camera.test_cam' });
+    const online = { ...OFFLINE_CAM, state: 'streaming', attributes: { ...OFFLINE_CAM.attributes, offline: false } };
+    // @ts-expect-error Mocking minimal hass
+    el.hass = { states: { 'camera.test_cam': online }, callWS: vi.fn() };
+    await el.updateComplete;
+    // @ts-expect-error Testing private method
+    await el._startStream();
+    // @ts-expect-error Testing private state
+    expect(el._streamUrl).toContain('/api/skylinewebcams_proxy/tok-123.m3u8');
+
+    // @ts-expect-error Mocking minimal hass
+    el.hass = { states: { 'camera.test_cam': OFFLINE_CAM }, callWS: vi.fn() };
+    await el.updateComplete;
+
+    // @ts-expect-error Testing private state
+    expect(el._streamUrl).toBeUndefined();
+    expect(el.shadowRoot?.querySelector('.offline-overlay')).not.toBeNull();
+  });
+
+  it('starts the stream once the webcam is broadcasting again', async () => {
+    vi.useFakeTimers();
+    el.setConfig({ entity: 'camera.test_cam' });
+    // @ts-expect-error Mocking minimal hass
+    el.hass = { states: { 'camera.test_cam': OFFLINE_CAM }, callWS: vi.fn() };
+    await el.updateComplete;
+    expect(el.shadowRoot?.querySelector('.offline-overlay')).not.toBeNull();
+
+    // @ts-expect-error Testing private method
+    const startSpy = vi.spyOn(el, '_startStream');
+    // @ts-expect-error Testing private state
+    el._isIntersecting = true;
+
+    const online = { ...OFFLINE_CAM, state: 'streaming', attributes: { ...OFFLINE_CAM.attributes, offline: false } };
+    // @ts-expect-error Mocking minimal hass
+    el.hass = { states: { 'camera.test_cam': online }, callWS: vi.fn() };
+    await el.updateComplete;
+
+    // Through the same backoff timer as a camera that comes back from unavailable.
+    expect(startSpy).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1000);
+    expect(startSpy).toHaveBeenCalled();
+    // @ts-expect-error Testing private state
+    expect(el._streamUrl).toContain('/api/skylinewebcams_proxy/tok-123.m3u8');
+
+    await el.updateComplete;
+    expect(el.shadowRoot?.querySelector('.offline-overlay')).toBeNull();
+    expect(el.shadowRoot?.querySelector('.video-container.offline')).toBeNull();
+    expect(el.shadowRoot?.querySelector('.video-controls')).not.toBeNull();
+  });
+
   it('never points the proxy at the entry id, which no longer opens it', async () => {
     el.setConfig({ entity: 'camera.test_cam' });
     const callWS = vi.fn(() => Promise.resolve({ url: '/api/hls/core-token/master_playlist.m3u8' }));
