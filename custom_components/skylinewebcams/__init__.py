@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from .camera import SkylineWebcamsCamera
 
 _LOGGER = logging.getLogger(__name__)
-PLATFORMS: list[Platform] = [Platform.CAMERA]
+PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.CAMERA]
 
 import voluptuous as vol
 

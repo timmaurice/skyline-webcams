@@ -1,5 +1,13 @@
 {
   "entity": {
+    "binary_sensor": {
+      "online": {
+        "default": "mdi:webcam",
+        "state": {
+          "off": "mdi:webcam-off"
+        }
+      }
+    },
     "camera": {
       "webcam": {
         "default": "mdi:webcam"

@@ -12,6 +12,7 @@ from bs4 import BeautifulSoup
 import voluptuous as vol
 
 from homeassistant import config_entries
+from homeassistant.components.binary_sensor import DOMAIN as BINARY_SENSOR_DOMAIN
 from homeassistant.components.camera import DOMAIN as CAMERA_DOMAIN
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
@@ -19,7 +20,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import DOMAIN, CONF_URL
-from .helpers import unique_id_for_url
+from .helpers import online_unique_id, unique_id_for_url
 from .scraper import SkylineWebcamsScraper
 
 _LOGGER = logging.getLogger(__name__)
@@ -323,16 +324,25 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if unique_id == entry.unique_id:
             return
 
+        # The Online binary sensor's id is derived from the camera's, so it
+        # moves along for the same reasons.
+        moves = {
+            (CAMERA_DOMAIN, entry.unique_id): unique_id,
+            (BINARY_SENSOR_DOMAIN, online_unique_id(entry.unique_id)): (
+                online_unique_id(unique_id)
+            ),
+        }
         registry = er.async_get(self.hass)
         for row in er.async_entries_for_config_entry(registry, entry.entry_id):
-            if row.domain == CAMERA_DOMAIN and row.unique_id == entry.unique_id:
-                _LOGGER.debug(
-                    "Moving %s from unique id %s to %s",
-                    row.entity_id,
-                    row.unique_id,
-                    unique_id,
-                )
-                registry.async_update_entity(row.entity_id, new_unique_id=unique_id)
+            if (new_unique_id := moves.get((row.domain, row.unique_id))) is None:
+                continue
+            _LOGGER.debug(
+                "Moving %s from unique id %s to %s",
+                row.entity_id,
+                row.unique_id,
+                new_unique_id,
+            )
+            registry.async_update_entity(row.entity_id, new_unique_id=new_unique_id)
 
     async def _async_title_after_move(
         self, entry: config_entries.ConfigEntry, url: str, page_title: str

@@ -87,8 +87,15 @@ async def reconfigure(hass, entry: MockConfigEntry, url: str) -> dict:
     return result
 
 
-def camera_rows(hass, entry: MockConfigEntry) -> list[er.RegistryEntry]:
-    return er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
+def camera_rows(
+    hass, entry: MockConfigEntry, domain: str = "camera"
+) -> list[er.RegistryEntry]:
+    """The entry's rows of one domain: the camera, or its Online sensor."""
+    return [
+        row
+        for row in er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
+        if row.domain == domain
+    ]
 
 
 async def test_the_form_starts_from_the_current_url(hass, entry, pages):
@@ -122,6 +129,12 @@ async def test_the_entry_moves_and_its_camera_stays(hass, entry, pages):
     assert hass.states.get("camera.neuschwanstein_2") is None
     assert entry.runtime_data.camera.unique_id == unique_id_for_url(NEW_URL)
     assert entry.runtime_data.camera.entity_id == "camera.neuschwanstein"
+
+    # The Online sensor's id is derived from the camera's, so it moves too.
+    [sensor] = camera_rows(hass, entry, "binary_sensor")
+    assert sensor.entity_id == "binary_sensor.neuschwanstein_online"
+    assert sensor.unique_id == f"{unique_id_for_url(NEW_URL)}_online"
+    assert hass.states.get("binary_sensor.neuschwanstein_online_2") is None
 
     # The device is keyed on the entry id, so it is the same device; only its
     # link to the page follows the URL.
