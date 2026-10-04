@@ -19,6 +19,16 @@ from custom_components.skylinewebcams.helpers import unique_id_for_url
 
 from .conftest import CAMERA_URL, make_entry
 
+
+def camera_rows(registry: er.EntityRegistry, entry) -> list[er.RegistryEntry]:
+    """The entry's camera rows; its Online binary sensor has a row as well."""
+    return [
+        row
+        for row in er.async_entries_for_config_entry(registry, entry.entry_id)
+        if row.domain == "camera"
+    ]
+
+
 OTHER_CAMERA_URL = (
     "https://www.skylinewebcams.com/en/webcam/italia/veneto/venezia/"
     "piazza-san-marco.html"
@@ -30,7 +40,7 @@ async def test_a_new_camera_is_named_after_its_entry(hass, setup_entry):
     await setup_entry(entry)
 
     registry = er.async_get(hass)
-    [entity] = er.async_entries_for_config_entry(registry, entry.entry_id)
+    [entity] = camera_rows(registry, entry)
     assert entity.entity_id == "camera.neuschwanstein"
     assert entity.has_entity_name is True
     assert entity.translation_key == "webcam"
@@ -49,7 +59,7 @@ async def test_an_entry_gets_one_service_device(hass, setup_entry):
     assert device.name == "Neuschwanstein"
     assert device.manufacturer == "SkylineWebcams"
     assert device.configuration_url == CAMERA_URL
-    [entity] = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
+    [entity] = camera_rows(er.async_get(hass), entry)
     assert entity.device_id == device.id
 
 
@@ -87,7 +97,7 @@ async def test_an_existing_camera_keeps_its_entity_id_and_name(hass, setup_entry
 
     await setup_entry(entry)
 
-    [entity] = er.async_entries_for_config_entry(registry, entry.entry_id)
+    [entity] = camera_rows(registry, entry)
     assert entity.entity_id == "camera.my_castle"
     assert entity.has_entity_name is True
     # Now attached to the new device, and still called by the entry title: the

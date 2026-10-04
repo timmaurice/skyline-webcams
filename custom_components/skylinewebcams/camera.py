@@ -13,14 +13,16 @@ import aiohttp
 from bs4 import BeautifulSoup
 from aiohttp import web
 from collections import OrderedDict
+from collections.abc import Callable
 
 from homeassistant.components.camera import Camera, CameraEntityFeature
 from homeassistant.components.ffmpeg import async_get_image
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.const import CONF_URL, CONF_NAME
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.network import NoURLAvailableError, get_url
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
@@ -29,8 +31,12 @@ from homeassistant.util.network import normalize_url
 import voluptuous as vol
 
 from . import SkylineConfigEntry
-from .const import DOMAIN
-from .helpers import async_camera_for_proxy_token, async_migrated_unique_id
+from .const import DOMAIN, OFFLINE_RETRY_SECONDS
+from .helpers import (
+    async_camera_for_proxy_token,
+    async_migrated_unique_id,
+    device_info_for_entry,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -148,25 +154,16 @@ async def async_setup_entry(
     """Set up SkylineWebcams camera from a config entry."""
     _init_domain_data(hass)
 
-    # One device per entry, and an entry is one webcam, so this is a device per
-    # webcam as well. It is keyed on the entry id rather than the unique id:
-    # the unique id is the normalised URL, which the migration can still move,
-    # and a device keyed on it would be left behind when it does. YAML cameras
-    # get no device, Home Assistant only attaches one to an entry's entities.
-    device_info = DeviceInfo(
-        identifiers={(DOMAIN, entry.entry_id)},
-        name=entry.title,
-        manufacturer="SkylineWebcams",
-        entry_type=DeviceEntryType.SERVICE,
-        configuration_url=entry.data[CONF_URL],
-    )
     camera = SkylineWebcamsCamera(
         hass,
         entry.data[CONF_URL],
         entry.title,
         entry.unique_id,
         entry.entry_id,
-        device_info=device_info,
+        device_info=device_info_for_entry(entry),
+        # The Online binary sensor follows the camera through this. A YAML
+        # camera has no entry, so no sensor and nobody to tell.
+        status_listener=entry.runtime_data.async_update_listeners,
     )
     entry.runtime_data.camera = camera
     async_add_entities([camera], True)
@@ -401,6 +398,7 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
         unique_id: str | None,
         entry_id: str,
         device_info: DeviceInfo | None = None,
+        status_listener: Callable[[], None] | None = None,
     ) -> None:
         """Initialize the camera."""
         super().__init__()
@@ -441,6 +439,17 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
         # Repeating the same message every 30 seconds for a site that is down
         # buries everything else in the log.
         self._failure_logged = False
+        # Whether the webcam is switched off on the site: its page answers, but
+        # says OFFLINE where the player would be and carries no stream. None
+        # until a page has been read, because until then nobody knows.
+        self._offline: bool | None = None
+        # Runs the next look at the page while the webcam is offline. Nothing
+        # else would: the card does not play an offline webcam, so no proxy
+        # request comes in to ask, and the camera does not poll.
+        self._cancel_offline_recheck: CALLBACK_TYPE | None = None
+        # Told when what the binary sensor shows changes, see _async_write_status.
+        self._status_listener = status_listener
+        self._published_status: tuple[bool, bool | None] | None = None
         self._additional_attributes = {"source": self._url}
         self._attr_available = True
         self._session = None
@@ -520,6 +529,7 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
         # Taken out of wherever the proxy finds it, so a camera that has been
         # removed is not streamed from any more - its entry may well still be
         # loaded, when only the entity was deleted.
+        self._async_cancel_offline_recheck()
         entry = self.platform.config_entry if self.platform else None
         if entry is None:
             self.hass.data.get(DOMAIN, {}).pop(self._entry_id, None)
@@ -527,12 +537,19 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
             runtime_data := getattr(entry, "runtime_data", None)
         ) is not None and runtime_data.camera is self:
             runtime_data.camera = None
+            # The sensor has no camera left to follow, and has to say so.
+            runtime_data.async_update_listeners()
         await super().async_will_remove_from_hass()
 
     @property
     def available(self) -> bool:
         """Return True if entity is available."""
         return self._attr_available
+
+    @property
+    def offline(self) -> bool | None:
+        """Whether the webcam is offline on the site, None before the first look."""
+        return self._offline
 
     async def async_update(self) -> None:
         """Update camera state in background."""
@@ -543,6 +560,10 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
         """Return the state attributes."""
         attrs = self._additional_attributes.copy()
         attrs["entry_id"] = self._entry_id
+        # What the card decides on whether to play or to say the webcam is off.
+        # False until a page has said otherwise: the camera starts out as one
+        # to play, the way it always has.
+        attrs["offline"] = self._offline is True
         # What the card builds the proxy URL from.
         attrs["proxy_token"] = self.proxy_token
         return attrs
@@ -559,6 +580,7 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
             "entity_id": self.entity_id,
             "unique_id": self.unique_id,
             "available": self._attr_available,
+            "offline": self._offline,
             "attributes": self.extra_state_attributes,
             "stream_url": self._stream_url,
             "stream_url_age_seconds": (
@@ -576,8 +598,12 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
 
     @property
     def is_streaming(self) -> bool:
-        """Return true if the camera is streaming."""
-        return True
+        """Return true if the camera is streaming.
+
+        An offline webcam has nothing to stream, so its state is idle. It stays
+        available: its page answers, and the poster is still there to show.
+        """
+        return self._offline is not True
 
     @property
     def ffmpeg_arguments(self) -> str:
@@ -713,6 +739,27 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
             self._last_update = asyncio.get_event_loop().time()
             self._fetch_failures = 0
             self._retry_not_before = 0.0
+            # A stream found is a webcam that is on, whatever the page found it
+            # by. Already done when the page itself was read, so this only
+            # writes anything for a fetch that did not get that far.
+            if self._async_set_offline(False):
+                self._async_write_status()
+        elif self._offline and self._attr_available:
+            # Switched off on the site's side, which is no outage to recover
+            # from in seconds - it tends to last hours. One look per interval,
+            # instead of the short backoff, and the look is scheduled rather
+            # than left to a viewer, because nobody plays an offline webcam.
+            # The failures are not counted: should the page itself fail later,
+            # its backoff starts from the beginning.
+            self._fetch_failures = 0
+            self._retry_not_before = (
+                asyncio.get_event_loop().time() + OFFLINE_RETRY_SECONDS
+            )
+            _LOGGER.debug(
+                "[%s] Webcam is offline, next look in %ds",
+                self.log_name,
+                OFFLINE_RETRY_SECONDS,
+            )
         else:
             # Stop counting once the delay is capped: a camera whose page
             # stays gone for weeks would otherwise raise 2 to an ever growing
@@ -730,7 +777,83 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
                 delay,
             )
 
+        if self._offline:
+            # Also after a look at an offline webcam's page that failed: the
+            # camera is unavailable then, and nothing else would look again.
+            self._async_schedule_offline_recheck()
+
         return self._stream_url
+
+    @callback
+    def _async_set_offline(self, offline: bool) -> bool:
+        """Record what the page said about the webcam, return whether it changed.
+
+        Going offline drops the stream URL held from before: it points at a
+        stream that has ended, and the proxy would only run into it. Coming
+        back is logged once, like a page that is reachable again.
+        """
+        if offline == self._offline:
+            return False
+        was_offline = self._offline
+        self._offline = offline
+        if offline:
+            _LOGGER.info(
+                "[%s] Webcam is offline on SkylineWebcams, looking again every %d "
+                "minutes",
+                self.log_name,
+                OFFLINE_RETRY_SECONDS // 60,
+            )
+            self._stream_url = None
+            self._stream_version += 1
+        else:
+            self._async_cancel_offline_recheck()
+            if was_offline:
+                _LOGGER.info("[%s] Webcam is broadcasting again", self.log_name)
+        return True
+
+    @callback
+    def _async_schedule_offline_recheck(self) -> None:
+        """Look at the page of an offline webcam again after the interval."""
+        if self.hass is None or self.platform is None:
+            # Not on its way into Home Assistant: nothing to schedule on. The
+            # platform is there already for the look before the entity is
+            # added, which is the one that finds an offline webcam at startup.
+            return
+        self._async_cancel_offline_recheck()
+
+        async def _async_recheck(_now) -> None:
+            self._cancel_offline_recheck = None
+            # Forced: this is the look the backoff was waiting for, and the
+            # timer and the window it closes need not agree to the millisecond.
+            await self.get_fresh_stream_url(force=True)
+
+        self._cancel_offline_recheck = async_call_later(
+            self.hass, OFFLINE_RETRY_SECONDS, _async_recheck
+        )
+
+    @callback
+    def _async_cancel_offline_recheck(self) -> None:
+        if self._cancel_offline_recheck is not None:
+            self._cancel_offline_recheck()
+            self._cancel_offline_recheck = None
+
+    @callback
+    def _async_write_status(self) -> None:
+        """Write the state, and tell the listeners if the status changed.
+
+        The status is what the Online binary sensor shows: whether the camera
+        is available and whether the webcam is offline. The camera's own state
+        is written on every fetch, because its attributes can change with
+        any of them; the listeners only hear about a change.
+        """
+        if self.entity_id:
+            self.async_write_ha_state()
+        status = (self._attr_available, self._offline)
+        if status == self._published_status:
+            return
+        self._published_status = status
+        if self._status_listener is not None:
+            self._status_listener()
 
     async def _fetch_stream_url(self) -> str | None:
         """Fetch the actual stream URL from the webcam page."""
@@ -757,8 +880,7 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
                         # Same as the error paths below: an entity that has
                         # gone unavailable is only unavailable once the state
                         # is written.
-                        if self.entity_id:
-                            self.async_write_ha_state()
+                        self._async_write_status()
                         return None
 
                     self._attr_available = True
@@ -806,6 +928,25 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
                             break
 
                     if not stream_path:
+                        if self._is_offline_page(soup):
+                            # Not a failure: the page says the webcam is off,
+                            # and that is the answer. The camera stays
+                            # available, it just has nothing to stream.
+                            self._async_set_offline(True)
+                        else:
+                            # The page answered and says nothing about being
+                            # offline, yet there is no stream on it - most
+                            # likely the site changed its markup. Worth a line
+                            # in the log, once, not one per attempt.
+                            self._async_set_offline(False)
+                            self._log_fetch_failure(
+                                "[%s] Found no stream on the webcam page %s, and "
+                                "nothing saying it is offline either",
+                                self.log_name,
+                                self._url,
+                                level=logging.WARNING,
+                            )
+                        self._async_write_status()
                         return None
 
                     if "livee.m3u8" in stream_path:
@@ -817,8 +958,8 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
                         )
                         self._failure_logged = False
 
-                    if self.entity_id:
-                        self.async_write_ha_state()
+                    self._async_set_offline(False)
+                    self._async_write_status()
                     return f"https://hd-auth.skylinewebcams.com/{stream_path}"
 
         except (aiohttp.ClientError, asyncio.TimeoutError) as err:
@@ -845,8 +986,7 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
         """
         self._log_fetch_failure(message, self.log_name, err)
         self._attr_available = False
-        if self.entity_id:
-            self.async_write_ha_state()
+        self._async_write_status()
         return None
 
     async def _parse_html(self, text: str) -> BeautifulSoup:
@@ -859,8 +999,27 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
             BeautifulSoup, text, "html.parser"
         )
 
-    def _log_fetch_failure(self, message: str, *args) -> None:
-        """Log the first failure of a run at ERROR, the rest at DEBUG.
+    @staticmethod
+    def _is_offline_page(soup: BeautifulSoup) -> bool:
+        """Whether the page says the webcam is offline.
+
+        An offline webcam's page still answers 200. Where the player would be
+        it shows a dimmed still in `<div class="request off">`, with OFFLINE
+        written across it in a <strong>. Either of the two is taken as the
+        marker, so a change to one of them alone does not hide it - and it is
+        only asked for once the page has turned out to carry no stream.
+        """
+        if soup.select_one("div.request.off") is not None:
+            return True
+        return any(
+            strong.get_text(strip=True).upper() == "OFFLINE"
+            for strong in soup.find_all("strong")
+        )
+
+    def _log_fetch_failure(
+        self, message: str, *args, level: int = logging.ERROR
+    ) -> None:
+        """Log the first failure of a run at `level`, the rest at DEBUG.
 
         A site that stays down would otherwise write an ERROR line per camera
         every refresh interval, which is what buried the log during the QA run.
@@ -869,5 +1028,5 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
         if self._failure_logged:
             _LOGGER.debug(message, *args)
             return
-        _LOGGER.error(message, *args)
+        _LOGGER.log(level, message, *args)
         self._failure_logged = True

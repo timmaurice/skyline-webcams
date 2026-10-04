@@ -71,6 +71,15 @@
     }
   },
   "entity": {
+    "binary_sensor": {
+      "online": {
+        "name": "Online",
+        "state": {
+          "off": "Offline",
+          "on": "Online"
+        }
+      }
+    },
     "camera": {
       "webcam": {
         "state_attributes": {
@@ -97,6 +106,9 @@
           },
           "proxy_token": {
             "name": "Proxy-Token"
+          },
+          "offline": {
+            "name": "Offline"
           }
         }
       }

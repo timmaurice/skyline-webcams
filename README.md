@@ -107,20 +107,28 @@ If Home Assistant serves HTTPS itself (an `ssl_certificate` in its HTTP settings
 
 ## Created Sensors
 
-| Sensor   | Description            | Attributes    | Example Value                                                                                          |
-| :------- | :--------------------- | :------------ | :----------------------------------------------------------------------------------------------------- |
-| `camera` | The main camera entity | `description` | Panoramic view of Schwangau, the Neuschwanstein and the Hohenschwangau Castles                         |
-|          |                        | `country`     | Germany                                                                                                |
-|          |                        | `region`      | Bavaria                                                                                                |
-|          |                        | `place`       | Schwangau                                                                                              |
-|          |                        | `source`      | `https://www.skylinewebcams.com/..`                                                                    |
-|          |                        | `poster`      | `https://static.skylinewebcams.com/..jpg` (still image from the webcam page)                           |
-|          |                        | `entry_id`    | `1a2b3c..` (the camera's config entry)                                                                 |
-|          |                        | `proxy_token` | random, new on every restart (what the bundled card opens the HLS proxy with; not recorded in history) |
+| Sensor          | Description              | Attributes    | Example Value                                                                                          |
+| :-------------- | :----------------------- | :------------ | :----------------------------------------------------------------------------------------------------- |
+| `camera`        | The main camera entity   | `description` | Panoramic view of Schwangau, the Neuschwanstein and the Hohenschwangau Castles                         |
+|                 |                          | `country`     | Germany                                                                                                |
+|                 |                          | `region`      | Bavaria                                                                                                |
+|                 |                          | `place`       | Schwangau                                                                                              |
+|                 |                          | `source`      | `https://www.skylinewebcams.com/..`                                                                    |
+|                 |                          | `poster`      | `https://static.skylinewebcams.com/..jpg` (still image from the webcam page)                           |
+|                 |                          | `entry_id`    | `1a2b3c..` (the camera's config entry)                                                                 |
+|                 |                          | `proxy_token` | random, new on every restart (what the bundled card opens the HLS proxy with; not recorded in history) |
+|                 |                          | `offline`     | `false`, or `true` while the webcam is switched off on SkylineWebcams                                  |
+| `binary_sensor` | Online (UI entries only) |               | `on` while the webcam broadcasts, `off` while it is offline                                            |
 
 A camera added through the UI also gets a device of its own, a service named after the entry, and the camera takes its name from it: renaming the device renames the camera, while its entity ID stays. Cameras from YAML have no device, Home Assistant only gives devices to UI entries.
 
-For a camera that does not play, **Download diagnostics** on its entry reports whether it holds a stream URL, how old that is and where the retry backoff stands. The stream token, the proxy token and the entry ID are redacted wherever the integration reports them. Home Assistant itself names the file after the entry and lists the entry's setup time under its ID. The entry ID no longer opens the stream proxy, but if you would rather not publish it, rename the file and remove that `setup_times` line before attaching it to a public issue.
+For a camera that does not play, **Download diagnostics** on its entry reports whether it holds a stream URL, how old that is, whether the webcam is offline and where the retry backoff stands. The stream token, the proxy token and the entry ID are redacted wherever the integration reports them. Home Assistant itself names the file after the entry and lists the entry's setup time under its ID. The entry ID no longer opens the stream proxy, but if you would rather not publish it, rename the file and remove that `setup_times` line before attaching it to a public issue.
+
+### Offline webcams
+
+SkylineWebcams switches webcams off now and then. Their page still answers, with a dimmed picture and **OFFLINE** where the player would be, so the camera stays available: its state is `idle` instead of `streaming`, and its `offline` attribute is `true`. While a webcam is offline the integration looks at its page again every 15 minutes, and picks the stream up as soon as it is back. A page that cannot be loaded at all is a different matter, and makes the camera unavailable as before.
+
+A camera added through the UI also gets an **Online** binary sensor (device class connectivity) on its device: `on` while the webcam broadcasts, `off` while it is offline, unknown until its page has been read and unavailable while the camera is. Cameras from YAML have no device and so no sensor, but carry the `offline` attribute all the same. To hear when a favourite webcam is back, trigger an automation on its Online sensor turning `on` and send yourself a notification.
 
 ### Lovelace Card
 
@@ -130,6 +138,7 @@ This integration includes a dedicated custom Lovelace card: `custom:skyline-webc
 
 #### Card Features
 
+- **Offline Notice**: When the webcam is offline on SkylineWebcams, the card does not try to play it. It shows the poster dimmed with "Webcam offline" across it, keeps the title, location, description and link, and starts the stream by itself once the webcam is back.
 - **Overlay Controls**: Interactive control bar (Play/Pause, Picture-in-Picture, Fullscreen) that fades in smoothly on hover.
 - **Viewport Pausing (IntersectionObserver)**: Automatically pauses playback and detaches Hls.js when the card is scrolled out of the viewport or the tab is hidden, optimizing network usage and CPU.
 - **Backend LRU Chunk Cache**: The backend proxy keeps the last few `.ts` video chunks in an LRU cache on the event loop, speeding up card startup and reducing upstream requests when several views play the same camera.

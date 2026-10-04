@@ -13,6 +13,8 @@
     "entity_not_found": "Entity not found: {entity}",
     "no_entity": "Pick a camera entity to show a webcam here.",
     "entity_unavailable": "Camera unavailable — reconnecting automatically.",
+    "webcam_offline": "Webcam offline",
+    "webcam_offline_detail": "It is not broadcasting on SkylineWebcams right now.",
     "retry": "Retry",
     "play": "Play",
     "pause": "Pause",

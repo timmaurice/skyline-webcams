@@ -32,7 +32,7 @@ ICONS = json.loads((COMPONENT / "icons.json").read_text())
 STRINGS = json.loads((COMPONENT / "strings.json").read_text())
 
 # Modules that are entity platforms, named after the domain they provide.
-PLATFORMS = {"camera"}
+PLATFORMS = {"binary_sensor", "camera"}
 
 
 def translation_keys_in_code() -> set[tuple[str, str]]:
@@ -61,7 +61,17 @@ def icon_keys() -> set[tuple[str, str]]:
 
 
 def test_there_are_translation_keys_to_check():
-    assert translation_keys_in_code() == {("camera", "webcam")}
+    assert translation_keys_in_code() == {
+        ("binary_sensor", "online"),
+        ("camera", "webcam"),
+    }
+
+
+def test_the_platforms_checked_here_are_the_ones_set_up():
+    """A platform added to __init__.py and not here would go unchecked."""
+    from custom_components.skylinewebcams import PLATFORMS as SET_UP
+
+    assert {str(platform) for platform in SET_UP} == PLATFORMS
 
 
 def test_every_translation_key_has_an_icon_and_no_icon_is_orphaned():
@@ -89,12 +99,13 @@ def test_no_entity_class_sets_a_fixed_icon():
         assert "_attr_icon" not in source, platform
 
 
-async def resolved_icon(hass, entity_id: str) -> str:
+async def resolved_icon(hass, entity_id: str, state: str | None = None) -> str:
     """The icon the frontend would show, looked up the way it looks it up."""
     entity = er.async_get(hass).async_get(entity_id)
     icons = await async_get_icons(hass, "entity", [entity.platform])
     domain = entity.entity_id.split(".")[0]
-    return icons[entity.platform][domain][entity.translation_key]["default"]
+    icon = icons[entity.platform][domain][entity.translation_key]
+    return icon.get("state", {}).get(state, icon["default"])
 
 
 async def test_an_entry_camera_has_no_icon_attribute(hass, setup_entry):
@@ -122,3 +133,13 @@ async def test_a_yaml_camera_gets_the_icon_as_well(hass, setup_yaml):
     assert entity.config_entry_id is None
     assert entity.platform == DOMAIN
     assert await resolved_icon(hass, "camera.castle") == "mdi:webcam"
+
+
+async def test_the_online_sensor_has_a_webcam_icon_per_state(hass, setup_entry):
+    entry = make_entry(hass)
+    await setup_entry(entry)
+
+    entity_id = "binary_sensor.neuschwanstein_online"
+    assert "icon" not in hass.states.get(entity_id).attributes
+    assert await resolved_icon(hass, entity_id, "on") == "mdi:webcam"
+    assert await resolved_icon(hass, entity_id, "off") == "mdi:webcam-off"
