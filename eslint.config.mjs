@@ -15,6 +15,8 @@ export default tseslint.config(
       'test-results/**',
       'venv/**',
       '.venv/**',
+      // Local agent worktrees: full copies of the repository, built bundles included.
+      '.claude/**',
     ],
   },
   js.configs.recommended,

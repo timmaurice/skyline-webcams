@@ -19,3 +19,6 @@ test/e2e/.auth.json
 test/e2e/.storage-state.json
 test-results
 playwright-report
+
+# Local agent state and worktrees - not the repository's to format
+.claude/
