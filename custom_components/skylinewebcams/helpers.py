@@ -10,10 +10,12 @@ from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 from homeassistant.components.camera import DOMAIN as CAMERA_DOMAIN
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 
-from .const import DOMAIN
+from .const import CONF_URL, DOMAIN
 
 if TYPE_CHECKING:
     from .camera import SkylineWebcamsCamera
@@ -22,6 +24,29 @@ _LOGGER = logging.getLogger(__name__)
 
 # The site serves the same camera under a language prefix, /en/..., /de/... .
 LANGUAGE_SEGMENT = re.compile(r"^[a-z]{2}$")
+
+
+def device_info_for_entry(entry: ConfigEntry) -> DeviceInfo:
+    """The device an entry's entities belong to: the webcam.
+
+    One device per entry, and an entry is one webcam, so this is a device per
+    webcam as well. It is keyed on the entry id rather than the unique id: the
+    unique id is the normalised URL, which the migration can still move, and a
+    device keyed on it would be left behind when it does. YAML cameras get no
+    device, Home Assistant only attaches one to an entry's entities.
+    """
+    return DeviceInfo(
+        identifiers={(DOMAIN, entry.entry_id)},
+        name=entry.title,
+        manufacturer="SkylineWebcams",
+        entry_type=DeviceEntryType.SERVICE,
+        configuration_url=entry.data[CONF_URL],
+    )
+
+
+def online_unique_id(camera_unique_id: str) -> str:
+    """The unique id of the Online binary sensor that goes with a camera."""
+    return f"{camera_unique_id}_online"
 
 
 def unique_id_for_url(url: str) -> str:

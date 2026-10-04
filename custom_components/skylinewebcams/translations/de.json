@@ -97,6 +97,9 @@
           },
           "proxy_token": {
             "name": "Proxy-Token"
+          },
+          "offline": {
+            "name": "Offline"
           }
         }
       }

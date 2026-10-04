@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 
 from .const import DOMAIN, CONF_URL
 from .helpers import async_migrated_unique_id
@@ -36,6 +37,30 @@ class SkylineRuntimeData:
     """
 
     camera: SkylineWebcamsCamera | None = None
+    # Whoever wants to hear when the camera's status changes - whether it is
+    # available, whether the webcam is offline. The Online binary sensor, so
+    # far. Kept here rather than on the camera because the two platforms are
+    # set up side by side: the sensor may well subscribe before the camera
+    # exists, and it has to keep its subscription when the camera is replaced.
+    _listeners: list[Callable[[], None]] = field(default_factory=list)
+
+    @callback
+    def async_add_listener(self, update_callback: Callable[[], None]) -> CALLBACK_TYPE:
+        """Call `update_callback` whenever the camera's status changes."""
+        self._listeners.append(update_callback)
+
+        @callback
+        def _remove() -> None:
+            if update_callback in self._listeners:
+                self._listeners.remove(update_callback)
+
+        return _remove
+
+    @callback
+    def async_update_listeners(self) -> None:
+        """Tell every listener that the camera's status has changed."""
+        for update_callback in list(self._listeners):
+            update_callback()
 
 
 type SkylineConfigEntry = ConfigEntry[SkylineRuntimeData]
