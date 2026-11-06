@@ -43,6 +43,10 @@ const SCHEMA = [
     default: true,
     selector: { boolean: {} },
   },
+  {
+    name: 'muted',
+    selector: { boolean: {} },
+  },
 ];
 
 export class SkylineWebcamsCardEditor extends LitElement implements LovelaceCardEditor {
@@ -99,6 +103,8 @@ export class SkylineWebcamsCardEditor extends LitElement implements LovelaceCard
         return localize(this.hass, 'editor.show_link');
       case 'show_video_controls':
         return localize(this.hass, 'editor.show_video_controls');
+      case 'muted':
+        return localize(this.hass, 'editor.muted');
       default:
         return schema.name;
     }

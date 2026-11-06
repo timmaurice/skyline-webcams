@@ -7,7 +7,8 @@
     "show_location": "Show Location",
     "show_description": "Show Description",
     "show_link": "Show Website Link",
-    "show_video_controls": "Show Video Controls"
+    "show_video_controls": "Show Video Controls",
+    "muted": "Mute Stream"
   },
   "card": {
     "entity_not_found": "Entity not found: {entity}",
