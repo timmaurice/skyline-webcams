@@ -132,6 +132,35 @@ describe('skyline-webcams-card', () => {
     expect(link).toBeNull(); // show_link is false by default
   });
 
+  describe('muted', () => {
+    const renderVideo = async (config: Record<string, unknown>): Promise<HTMLVideoElement> => {
+      el.setConfig({ entity: 'camera.test_cam', ...config } as never);
+      // @ts-expect-error Mocking minimal hass
+      el.hass = {
+        states: { 'camera.test_cam': { state: 'idle', attributes: { friendly_name: 'Test Cam' } } },
+        callWS: () => Promise.resolve({ url: '/api/mock' }),
+      };
+      await el.updateComplete;
+      return el.shadowRoot!.querySelector('video')!;
+    };
+
+    it('plays with sound by default', async () => {
+      expect((await renderVideo({})).muted).toBe(false);
+    });
+
+    it('mutes the video element itself, not just its attribute', async () => {
+      // The attribute alone left the property false, and the stream audible.
+      expect((await renderVideo({ muted: true })).muted).toBe(true);
+    });
+
+    it('follows the option when it is switched in the editor', async () => {
+      const video = await renderVideo({ muted: true });
+      el.setConfig({ entity: 'camera.test_cam', muted: false } as never);
+      await el.updateComplete;
+      expect(video.muted).toBe(false);
+    });
+  });
+
   it('renders the original link when show_link is true', async () => {
     el.setConfig({ entity: 'camera.test_cam', show_link: true });
     // @ts-expect-error Mocking minimal hass

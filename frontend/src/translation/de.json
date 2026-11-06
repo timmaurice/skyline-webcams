@@ -7,7 +7,8 @@
     "show_location": "Ort anzeigen",
     "show_description": "Beschreibung anzeigen",
     "show_link": "Webseiten-Link anzeigen",
-    "show_video_controls": "Videosteuerelemente anzeigen"
+    "show_video_controls": "Videosteuerelemente anzeigen",
+    "muted": "Ton stummschalten"
   },
   "card": {
     "entity_not_found": "Entität nicht gefunden: {entity}",

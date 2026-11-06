@@ -608,6 +608,11 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
     const linkHref = this._config.show_link ? stateObj.attributes.source || '' : '';
     const hasInfo = !!(titleUnderVideo || locationText || descriptionText || linkHref);
     const bare = !titleInHeader && !hasInfo;
+    // Bound as a property, not as the attribute. The `muted` attribute only
+    // seeds the property when the parser creates the element; Lit sets it on a
+    // clone afterwards, where it changes nothing - the stream played with sound
+    // although the template said muted.
+    const muted = this._config.muted === true;
 
     return html`
       <ha-card class=${bare ? 'bare' : ''}>
@@ -672,7 +677,7 @@ export class SkylineWebcamsCard extends LitElement implements LovelaceCard {
               playsinline
               autoplay
               preload="auto"
-              ?muted=${true}
+              .muted=${muted}
               poster=${stateObj.attributes.poster || stateObj.attributes.entity_picture || ''}
               @play=${() => this.requestUpdate()}
               @pause=${() => this.requestUpdate()}

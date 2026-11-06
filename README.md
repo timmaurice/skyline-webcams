@@ -158,6 +158,7 @@ This integration includes a dedicated custom Lovelace card: `custom:skyline-webc
 | `show_description`    | boolean | `true`       | Show the webcam's description                                                |
 | `show_link`           | boolean | `false`      | Show a direct link to the original webcam page on SkylineWebcams             |
 | `show_video_controls` | boolean | `true`       | Show the video overlay controls (Play/Pause, Picture-in-Picture, Fullscreen) |
+| `muted`               | boolean | `false`      | Play the stream without sound, for webcams that broadcast audio              |
 
 #### Example YAML
 

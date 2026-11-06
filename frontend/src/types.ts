@@ -68,6 +68,8 @@ export interface SkylineWebcamsCardConfig extends LovelaceCardConfig {
   show_description?: boolean;
   show_link?: boolean;
   show_video_controls?: boolean;
+  /** Plays the stream without sound. Off by default, so a webcam with audio is heard. */
+  muted?: boolean;
 }
 
 /**
