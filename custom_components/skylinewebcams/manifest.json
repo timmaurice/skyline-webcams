@@ -2,6 +2,7 @@
   "domain": "skylinewebcams",
   "name": "SkylineWebcams",
   "after_dependencies": ["ffmpeg"],
+  "categories": ["security_safety.cameras"],
   "codeowners": ["@timmaurice"],
   "config_flow": true,
   "dependencies": ["http", "stream"],
