@@ -56,8 +56,10 @@ test.describe('The card editor in a storage-mode dashboard', () => {
     const form = editor.locator('ha-form');
     await expect(form).toBeVisible();
     await expect(form.locator('ha-entity-picker')).toHaveCount(1);
-    await expect(dialog.getByText('Camera Entity', { exact: false })).toBeVisible();
-    await expect(dialog.getByText('Aspect Ratio', { exact: false })).toBeVisible();
+    // The entity picker also keeps a hidden copy of its label (aria-labelledby
+    // target), so only count the visible text.
+    await expect(dialog.getByText('Camera Entity', { exact: false }).locator('visible=true')).toHaveCount(1);
+    await expect(dialog.getByText('Aspect Ratio', { exact: false }).locator('visible=true').first()).toBeVisible();
 
     // Everything above passes with computeLabel handed over unbound, which is
     // why the reported missing entity row does not reproduce: real ha-form
