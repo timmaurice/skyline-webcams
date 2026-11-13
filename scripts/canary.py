@@ -11,7 +11,8 @@ compares the page's markup with the fixture of it, so a change that the parser
 happens to survive still shows up.
 
 Exit status: 0 all fine, 1 the markup changed (or a parser found nothing),
-2 the site could not be fetched, which says nothing about the markup.
+2 the site could not be fetched, which says nothing about the markup: it was
+unreachable, rate limited (HTTP 429) or failing (5xx).
 Runs weekly in .github/workflows/canary.yml. When it fails because the markup
 moved, fix the parser, then `python scripts/refresh_fixtures.py`.
 """
@@ -27,6 +28,7 @@ from live_site import (
     FIXTURES,
     PAGES,
     FetchError,
+    PageNotOk,
     fetch,
     make_session,
     selectors,
@@ -44,6 +46,46 @@ LIST_PAGES = ("countries.html", "country.html", "region.html", "place.html")
 CAMERA_PAGES = ("camera.html", "camera_offline.html")
 
 
+class _Page:
+    """A page that was fetched once, as the scraper and the camera read it."""
+
+    def __init__(self, text: str) -> None:
+        self.status = 200
+        self._text = text
+
+    async def text(self) -> str:
+        return self._text
+
+    async def __aenter__(self) -> "_Page":
+        return self
+
+    async def __aexit__(self, *exc) -> None:
+        return None
+
+
+class _Replay:
+    """A session that answers from the pages `prefetch` fetched.
+
+    The scraper and the camera swallow an error status (a 429 comes back to
+    them as "no page") and the canary would call that a markup change. Fetching
+    the pages up front, with the status checked, settles that first - and each
+    page is asked of the site once, which the site's rate limit appreciates.
+    """
+
+    def __init__(self, pages: dict[str, str]) -> None:
+        self._pages = pages
+
+    def get(self, url: str, **kwargs) -> _Page:
+        if url not in self._pages:
+            raise FetchError(f"{url} was not fetched up front")
+        return _Page(self._pages[url])
+
+
+async def prefetch(session) -> _Replay:
+    """Fetch every page once. Raises FetchError / PageNotOk, see live_site."""
+    return _Replay({BASE + path: await fetch(session, path) for path in PAGES.values()})
+
+
 class _Executor:
     """The one thing a camera asks of `hass` while it reads a page."""
 
@@ -57,7 +99,11 @@ def fail(problem: str, failures: list[str]) -> None:
 
 
 async def check_lists(session, scraper, failures: list[str]) -> None:
-    structure = await scraper.get_structure()
+    try:
+        structure = await scraper.get_structure()
+    except SkylineWebcamsParseError:
+        fail("the directory lists no continents", failures)
+        structure = {}
     countries = sum(len(c) for c in structure.values())
     print(f"directory: {len(structure)} continents, {countries} countries")
     if len(structure) < 4 or countries < 30:
@@ -106,7 +152,11 @@ async def check_lists(session, scraper, failures: list[str]) -> None:
 async def check_cameras(session, scraper, failures: list[str]) -> None:
     for name in CAMERA_PAGES:
         url = BASE + PAGES[name]
-        page = await scraper.get_locations_or_cameras(url)
+        try:
+            page = await scraper.get_locations_or_cameras(url)
+        except SkylineWebcamsParseError:
+            fail(f"{url} is not read as a webcam page: nothing found", failures)
+            continue
         if page.get("type") != "camera" or page.get("name") == "Skyline Webcam":
             fail(f"{url} is not read as a webcam page: {page}", failures)
             continue
@@ -139,10 +189,15 @@ async def check_cameras(session, scraper, failures: list[str]) -> None:
 async def main() -> int:
     failures: list[str] = []
     try:
-        async with make_session() as session:
+        async with make_session() as live:
+            session = await prefetch(live)
             scraper = SkylineWebcamsScraper(session)
             await check_lists(session, scraper, failures)
             await check_cameras(session, scraper, failures)
+    except PageNotOk as err:
+        print(f"\nthe site answered, but not with the page: {err}")
+        print("The page has most likely moved. Fix PAGES in scripts/live_site.py.")
+        return 1
     except FetchError as err:
         print(f"\ncould not reach the site, nothing is known about its markup: {err}")
         return 2
