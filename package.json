@@ -17,6 +17,7 @@
     "check-format": "prettier --check .",
     "lint": "eslint .",
     "test": "NODE_ENV=production vitest run --reporter=verbose",
+    "pretest:e2e": "node scripts/ensure-deps.mjs",
     "test:e2e": "playwright test"
   },
   "devDependencies": {
