@@ -1,0 +1,69 @@
+name: Canary
+
+# The unit tests run on trimmed copies of the site's pages, so they stay green
+# when skylinewebcams.com changes its markup - which is how browse, the offline
+# detection and the breadcrumb all broke behind a green suite. This job runs the
+# parsers against the live site once a week and fails when they find nothing.
+# See scripts/canary.py; when it fails because the markup moved, fix the parser
+# and run scripts/refresh_fixtures.py.
+
+on:
+  schedule:
+    - cron: '17 6 * * 1' # Mondays, off the hour
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  canary:
+    name: Live site canary
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          # Same interpreter as the tests: the camera is imported from the
+          # integration, and with it Home Assistant.
+          python-version: '3.14'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements_test.txt
+
+      - name: Run the parsers against the live site
+        run: |
+          set +e
+          python scripts/canary.py 2>&1 | tee canary_output.txt
+          code=${PIPESTATUS[0]}
+          set -e
+
+          {
+            echo "### Live site canary"
+            if [ "$code" -eq 0 ]; then
+              echo "> [!NOTE]"
+              echo "> The parsers still read the live site."
+            elif [ "$code" -eq 1 ]; then
+              echo "> [!CAUTION]"
+              echo "> **The site's markup has most likely changed.** Fix the parser, then run \`python scripts/refresh_fixtures.py\`."
+            else
+              echo "> [!WARNING]"
+              echo "> The site could not be fetched, so nothing is known about its markup."
+            fi
+            echo ""
+            echo '```'
+            cat canary_output.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          exit "$code"
