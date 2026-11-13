@@ -22,6 +22,7 @@ import asyncio
 import logging
 import types
 from datetime import timedelta
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -429,3 +430,20 @@ async def test_a_yaml_camera_says_offline_too_but_gets_no_sensor(hass, stand_ins
     assert camera._cancel_recheck is not None
     await camera.async_remove()
     assert camera._cancel_recheck is None
+
+
+@pytest.mark.parametrize("fixture", ["camera.html", "camera_offline.html"])
+async def test_the_redesigned_breadcrumb_gives_country_region_place(
+    hass, entry, site, fixture
+):
+    """The live pages list them as links in nav.crumbs, not in ol.breadcrumb."""
+    path = Path(__file__).parent / "fixtures" / fixture
+    site.page = path.read_text(encoding="utf-8")
+    await look_again(hass, entry)
+
+    attrs = hass.states.get(CAMERA).attributes
+    expected = {
+        "camera.html": ("Italy", "Veneto", "Venice"),
+        "camera_offline.html": ("Italy", "Lazio", "Rome"),
+    }[fixture]
+    assert (attrs["country"], attrs["region"], attrs["place"]) == expected
