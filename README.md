@@ -47,6 +47,18 @@ For a quick trial or development, a Docker environment is provided.
 
 The Docker environment comes **pre-configured** with five live webcams (Neuschwanstein Castle, Tsavo East, Venice, Rome and Shanghai) and a dashboard that shows both the standard camera card and the bundled custom card, so you can see it in action immediately.
 
+### End-to-end tests
+
+The Playwright suite drives a real Home Assistant from this repository's `docker-compose.yml`. From a fresh clone:
+
+```bash
+npm ci
+npx playwright install --with-deps chromium
+npm run test:e2e
+```
+
+The run builds nothing itself (the card bundle is committed; run `npm run build` after editing `frontend/`), starts the compose container if it is not running, and onboards a brand-new instance through the API (user `admin`, password `password`). The specs use synthetic camera states, so they do not need skylinewebcams.com. Stop the container afterwards with `docker compose stop`.
+
 ## Configuration
 
 ### UI (Recommended)
