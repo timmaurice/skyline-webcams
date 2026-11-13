@@ -16,6 +16,7 @@
     "format": "prettier . --write && black .",
     "check-format": "prettier --check .",
     "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
     "test": "NODE_ENV=production vitest run --reporter=verbose",
     "test:e2e": "playwright test"
   },

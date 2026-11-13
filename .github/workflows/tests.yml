@@ -182,6 +182,9 @@ jobs:
             exit 1
           fi
 
+      - name: Type check
+        run: npm run typecheck
+
       - name: Run unit tests
         run: |
           # Run tests with NO_COLOR=true to strip ANSI escapes
