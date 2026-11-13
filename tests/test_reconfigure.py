@@ -56,7 +56,9 @@ class FakeSession:
             raise aiohttp.ClientError(f"no route to {url}")
         if isinstance(page, int):
             return FakeResponse(page, "")
-        return FakeResponse(200, f"<html><h1>{page}</h1></html>")
+        return FakeResponse(
+            200, f'<html><div id="live"></div><h1>{page}</h1></html>'
+        )
 
 
 @pytest.fixture
