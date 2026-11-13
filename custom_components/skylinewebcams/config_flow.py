@@ -201,9 +201,13 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "unknown"
             else:
                 # Outside the try: AbortFlow must reach core, not the catch-all.
-                await self.async_set_unique_id(unique_id_for_url(user_input[CONF_URL]))
+                unique_id = unique_id_for_url(user_input[CONF_URL])
+                await self.async_set_unique_id(unique_id)
                 self._abort_if_unique_id_configured()
-                return self.async_create_entry(title=info["title"], data=user_input)
+                if self._camera_id_taken(None, unique_id):
+                    errors["base"] = "already_configured"
+                else:
+                    return self.async_create_entry(title=info["title"], data=user_input)
 
         return self.async_show_form(
             step_id="manual", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
@@ -297,23 +301,25 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return False
 
     def _camera_id_taken(
-        self, entry: config_entries.ConfigEntry, unique_id: str
+        self, entry: config_entries.ConfigEntry | None, unique_id: str
     ) -> bool:
         """Whether a camera row that is not this entry's holds the new id.
+
+        With no `entry` (a new one being added) any row holding the id counts.
 
         A YAML camera for that page, or one left behind by an earlier run.
         Moving onto it is not possible, and letting the reload take it over
         would hand this camera that row's entity id instead of its own. The
         user can delete a leftover row under Settings > Entities and try again.
         """
-        if unique_id == entry.unique_id:
+        if entry is not None and unique_id == entry.unique_id:
             return False
         registry = er.async_get(self.hass)
         entity_id = registry.async_get_entity_id(CAMERA_DOMAIN, DOMAIN, unique_id)
         if entity_id is None:
             return False
         row = registry.async_get(entity_id)
-        return row is None or row.config_entry_id != entry.entry_id
+        return row is None or entry is None or row.config_entry_id != entry.entry_id
 
     @callback
     def _async_move_camera_entity(
@@ -485,8 +491,11 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if result.get("type") == "camera":
             # Direct camera hit
-            await self.async_set_unique_id(unique_id_for_url(result["url"]))
+            unique_id = unique_id_for_url(result["url"])
+            await self.async_set_unique_id(unique_id)
             self._abort_if_unique_id_configured()
+            if self._camera_id_taken(None, unique_id):
+                return self.async_abort(reason="already_configured")
             return self.async_create_entry(
                 title=result["name"], data={CONF_URL: result["url"]}
             )
