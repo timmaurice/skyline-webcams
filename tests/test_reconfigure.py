@@ -304,3 +304,24 @@ async def test_a_deleted_entry_aborts(hass, entry, pages):
 
     assert result["type"] == "abort"
     assert result["reason"] == "unknown_entry"
+
+
+async def test_a_duplicate_manual_url_aborts_without_a_traceback(
+    hass, entry, pages, caplog
+):
+    """AbortFlow used to be swallowed by the catch-all and shown as "unknown"."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": "user"}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"action": "Manual URL"}
+    )
+    assert result["step_id"] == "manual"
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_URL: CAMERA_URL}
+    )
+
+    assert result["type"] == "abort"
+    assert result["reason"] == "already_configured"
+    assert "Unexpected exception" not in caplog.text

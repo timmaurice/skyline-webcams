@@ -194,14 +194,16 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             try:
                 info = await validate_input(self.hass, user_input)
-                await self.async_set_unique_id(unique_id_for_url(user_input[CONF_URL]))
-                self._abort_if_unique_id_configured()
-                return self.async_create_entry(title=info["title"], data=user_input)
             except ValueError as error:
                 errors["base"] = str(error)
             except Exception:  # pylint: disable=broad-except
                 _LOGGER.exception("Unexpected exception")
                 errors["base"] = "unknown"
+            else:
+                # Outside the try: AbortFlow must reach core, not the catch-all.
+                await self.async_set_unique_id(unique_id_for_url(user_input[CONF_URL]))
+                self._abort_if_unique_id_configured()
+                return self.async_create_entry(title=info["title"], data=user_input)
 
         return self.async_show_form(
             step_id="manual", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
