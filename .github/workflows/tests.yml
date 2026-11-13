@@ -228,3 +228,10 @@ jobs:
             echo "- ❌ **Rollup**: Lovelace card build failed" >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
+
+      - name: Check the committed bundle matches the source
+        run: |
+          if ! git diff --exit-code -- custom_components/skylinewebcams/skyline-webcams-card.js; then
+            echo "::error::custom_components/skylinewebcams/skyline-webcams-card.js is stale. Run npm run build and commit the result."
+            exit 1
+          fi
