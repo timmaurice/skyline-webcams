@@ -933,23 +933,19 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
                     if og_img := soup.find("meta", attrs={"property": "og:image"}):
                         self._additional_attributes["poster"] = og_img.get("content")
 
-                    if breadcrumb := soup.find("ol", class_="breadcrumb"):
-                        items = breadcrumb.find_all("li")
-                        try:
-                            if len(items) > 1:
-                                self._additional_attributes["country"] = items[
-                                    1
-                                ].get_text(strip=True)
-                            if len(items) > 2:
-                                self._additional_attributes["region"] = items[
-                                    2
-                                ].get_text(strip=True)
-                            if len(items) > 3:
-                                self._additional_attributes["place"] = items[
-                                    3
-                                ].get_text(strip=True)
-                        except (IndexError, AttributeError):
-                            pass
+                    # The redesigned page lists country, region and place as
+                    # links in nav.crumbs; the old one had ol.breadcrumb whose
+                    # first item is the site root ("Live Cams").
+                    if crumbs := soup.select_one("nav.crumbs"):
+                        names = [a.get_text(strip=True) for a in crumbs.find_all("a")]
+                    elif breadcrumb := soup.find("ol", class_="breadcrumb"):
+                        names = [
+                            li.get_text(strip=True) for li in breadcrumb.find_all("li")
+                        ][1:]
+                    else:
+                        names = []
+                    for key, name in zip(("country", "region", "place"), names):
+                        self._additional_attributes[key] = name
 
                     # Find stream source
                     patterns = [
