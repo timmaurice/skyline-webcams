@@ -11,7 +11,7 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "outDir": "custom_components/skylinewebcams",
-    "rootDir": "frontend/src",
+    "rootDir": "frontend",
     "declaration": false,
     "sourceMap": true,
     "lib": ["ES2022", "DOM"],

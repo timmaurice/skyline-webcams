@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import '../src/skyline-webcams-card-editor.js';
 import { SkylineWebcamsCardEditor } from '../src/skyline-webcams-card-editor.js';
+import { mockHass } from './helpers.js';
 
 describe('skyline-webcams-card-editor', () => {
   let el: SkylineWebcamsCardEditor;
@@ -16,8 +17,7 @@ describe('skyline-webcams-card-editor', () => {
 
   it('renders the form once hass and config are set', async () => {
     el.setConfig({ type: 'custom:skyline-webcams-card', entity: 'camera.test_cam' });
-    // @ts-expect-error Mocking minimal hass
-    el.hass = { states: {}, language: 'en' };
+    el.hass = mockHass({ states: {}, language: 'en' });
     await el.updateComplete;
 
     expect(el.shadowRoot?.querySelector('ha-form')).not.toBeNull();
@@ -25,8 +25,7 @@ describe('skyline-webcams-card-editor', () => {
 
   it('resolves labels from the editor hass, not from whatever calls it', async () => {
     el.setConfig({ type: 'custom:skyline-webcams-card', entity: 'camera.test_cam' });
-    // @ts-expect-error Mocking minimal hass
-    el.hass = { states: {}, language: 'de' };
+    el.hass = mockHass({ states: {}, language: 'de' });
     await el.updateComplete;
 
     const form = el.shadowRoot?.querySelector('ha-form') as HTMLElement & {

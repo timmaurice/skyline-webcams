@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import '../src/skyline-webcams-card.js';
 import { SkylineWebcamsCard } from '../src/skyline-webcams-card.js';
+import type { HomeAssistant, SkylineWebcamsCardConfig } from '../src/types.js';
+import { cardConfig, mockHass, type MockEntity } from './helpers.js';
 
 describe('skyline-webcams-card', () => {
   let el: SkylineWebcamsCard;
@@ -31,13 +33,12 @@ describe('skyline-webcams-card', () => {
     });
 
     // And that config still has to preview, which is the whole point of a stub.
-    expect(() => el.setConfig(config as never)).not.toThrow();
+    expect(() => el.setConfig(config as SkylineWebcamsCardConfig)).not.toThrow();
   });
 
   it('renders a hint rather than an error when no entity is configured', async () => {
-    el.setConfig(SkylineWebcamsCard.getStubConfig() as never);
-    // @ts-expect-error Mocking minimal hass
-    el.hass = { states: {} };
+    el.setConfig(SkylineWebcamsCard.getStubConfig() as SkylineWebcamsCardConfig);
+    el.hass = mockHass({ states: {} });
     await el.updateComplete;
 
     const hint = el.shadowRoot?.querySelector('.no-entity-hint');
@@ -48,7 +49,7 @@ describe('skyline-webcams-card', () => {
   });
 
   it('picks a real camera for the stub config so the picker preview works', () => {
-    const hass = {
+    const hass = mockHass({
       states: {
         'light.kitchen': { entity_id: 'light.kitchen', state: 'on', attributes: {} },
         'camera.front_door': { entity_id: 'camera.front_door', state: 'idle', attributes: {} },
@@ -58,23 +59,21 @@ describe('skyline-webcams-card', () => {
           attributes: { source: 'https://www.skylinewebcams.com/en/webcam/venezia.html' },
         },
       },
-    };
+    });
 
-    // @ts-expect-error Mocking minimal hass
     const config = SkylineWebcamsCard.getStubConfig(hass, Object.keys(hass.states));
     expect(config.entity).toBe('camera.venice');
 
     // The picker feeds the stub straight back into setConfig.
-    expect(() => el.setConfig(config as never)).not.toThrow();
+    expect(() => el.setConfig(config as SkylineWebcamsCardConfig)).not.toThrow();
   });
 
   it('falls back to any camera when no skyline camera exists', () => {
-    const hass = {
+    const hass = mockHass({
       states: {
         'camera.front_door': { entity_id: 'camera.front_door', state: 'idle', attributes: {} },
       },
-    };
-    // @ts-expect-error Mocking minimal hass
+    });
     expect(SkylineWebcamsCard.getStubConfig(hass, ['light.kitchen', 'camera.front_door']).entity).toBe(
       'camera.front_door',
     );
@@ -92,7 +91,7 @@ describe('skyline-webcams-card', () => {
   });
 
   it('sets config correctly', () => {
-    el.setConfig({ entity: 'camera.test_cam' });
+    el.setConfig(cardConfig({ entity: 'camera.test_cam' }));
     expect(el.getCardSize()).toBe(4);
   });
 
@@ -102,9 +101,8 @@ describe('skyline-webcams-card', () => {
   });
 
   it('renders an error container if entity is not found in hass', async () => {
-    el.setConfig({ entity: 'camera.test_cam' });
-    // @ts-expect-error Mocking minimal hass
-    el.hass = { states: {} };
+    el.setConfig(cardConfig({ entity: 'camera.test_cam' }));
+    el.hass = mockHass({ states: {} });
     await el.updateComplete;
 
     const error = el.shadowRoot?.querySelector('.error-container');
@@ -113,9 +111,8 @@ describe('skyline-webcams-card', () => {
   });
 
   it('renders the video container when valid state is provided', async () => {
-    el.setConfig({ entity: 'camera.test_cam' });
-    // @ts-expect-error Mocking minimal hass
-    el.hass = {
+    el.setConfig(cardConfig({ entity: 'camera.test_cam' }));
+    el.hass = mockHass({
       states: {
         'camera.test_cam': {
           state: 'idle',
@@ -123,7 +120,7 @@ describe('skyline-webcams-card', () => {
         },
       },
       callWS: () => Promise.resolve({ url: '/api/mock' }),
-    };
+    });
     await el.updateComplete;
 
     const container = el.shadowRoot?.querySelector('.video-container');
@@ -133,13 +130,12 @@ describe('skyline-webcams-card', () => {
   });
 
   describe('muted', () => {
-    const renderVideo = async (config: Record<string, unknown>): Promise<HTMLVideoElement> => {
-      el.setConfig({ entity: 'camera.test_cam', ...config } as never);
-      // @ts-expect-error Mocking minimal hass
-      el.hass = {
+    const renderVideo = async (config: Partial<SkylineWebcamsCardConfig>): Promise<HTMLVideoElement> => {
+      el.setConfig(cardConfig(config));
+      el.hass = mockHass({
         states: { 'camera.test_cam': { state: 'idle', attributes: { friendly_name: 'Test Cam' } } },
         callWS: () => Promise.resolve({ url: '/api/mock' }),
-      };
+      });
       await el.updateComplete;
       return el.shadowRoot!.querySelector('video')!;
     };
@@ -155,16 +151,15 @@ describe('skyline-webcams-card', () => {
 
     it('follows the option when it is switched in the editor', async () => {
       const video = await renderVideo({ muted: true });
-      el.setConfig({ entity: 'camera.test_cam', muted: false } as never);
+      el.setConfig(cardConfig({ muted: false }));
       await el.updateComplete;
       expect(video.muted).toBe(false);
     });
   });
 
   it('renders the original link when show_link is true', async () => {
-    el.setConfig({ entity: 'camera.test_cam', show_link: true });
-    // @ts-expect-error Mocking minimal hass
-    el.hass = {
+    el.setConfig(cardConfig({ entity: 'camera.test_cam', show_link: true }));
+    el.hass = mockHass({
       states: {
         'camera.test_cam': {
           state: 'idle',
@@ -172,7 +167,7 @@ describe('skyline-webcams-card', () => {
         },
       },
       callWS: () => Promise.resolve({ url: '/api/mock' }),
-    };
+    });
     await el.updateComplete;
 
     const link = el.shadowRoot?.querySelector('.webcam-source-link') as HTMLAnchorElement;
@@ -181,9 +176,8 @@ describe('skyline-webcams-card', () => {
   });
 
   it('renders video control buttons when valid state is provided', async () => {
-    el.setConfig({ entity: 'camera.test_cam' });
-    // @ts-expect-error Mocking minimal hass
-    el.hass = {
+    el.setConfig(cardConfig({ entity: 'camera.test_cam' }));
+    el.hass = mockHass({
       states: {
         'camera.test_cam': {
           state: 'idle',
@@ -191,7 +185,7 @@ describe('skyline-webcams-card', () => {
         },
       },
       callWS: () => Promise.resolve({ url: '/api/mock' }),
-    };
+    });
     await el.updateComplete;
 
     const controls = el.shadowRoot?.querySelector('.video-controls');
@@ -202,9 +196,8 @@ describe('skyline-webcams-card', () => {
   });
 
   it('triggers control action handlers', async () => {
-    el.setConfig({ entity: 'camera.test_cam' });
-    // @ts-expect-error Mocking minimal hass
-    el.hass = {
+    el.setConfig(cardConfig({ entity: 'camera.test_cam' }));
+    el.hass = mockHass({
       states: {
         'camera.test_cam': {
           state: 'idle',
@@ -212,7 +205,7 @@ describe('skyline-webcams-card', () => {
         },
       },
       callWS: () => Promise.resolve({ url: '/api/mock' }),
-    };
+    });
     await el.updateComplete;
 
     const playBtn = el.shadowRoot?.querySelector('.control-btn') as HTMLButtonElement;
@@ -236,15 +229,14 @@ describe('skyline-webcams-card', () => {
   });
 
   it('shows an unavailable state instead of a black area when the camera goes unavailable', async () => {
-    el.setConfig({ entity: 'camera.test_cam' });
+    el.setConfig(cardConfig({ entity: 'camera.test_cam' }));
     // Home Assistant strips the attributes of an unavailable entity, so proxy_token is gone.
-    // @ts-expect-error Mocking minimal hass
-    el.hass = {
+    el.hass = mockHass({
       states: {
         'camera.test_cam': { state: 'unavailable', attributes: {} },
       },
       callWS: () => Promise.resolve({ url: '/api/mock' }),
-    };
+    });
     await el.updateComplete;
 
     const overlay = el.shadowRoot?.querySelector('.unavailable-overlay');
@@ -254,26 +246,23 @@ describe('skyline-webcams-card', () => {
 
   it('restarts the stream through the backoff timer once the camera comes back', async () => {
     vi.useFakeTimers();
-    el.setConfig({ entity: 'camera.test_cam' });
-    // @ts-expect-error Mocking minimal hass
-    el.hass = {
+    el.setConfig(cardConfig({ entity: 'camera.test_cam' }));
+    el.hass = mockHass({
       states: {
         'camera.test_cam': { state: 'unavailable', attributes: {} },
       },
       callWS: () => Promise.resolve({ url: '/api/mock' }),
-    };
+    });
     await el.updateComplete;
     expect(el.shadowRoot?.querySelector('.unavailable-overlay')).not.toBeNull();
 
-    // @ts-expect-error Testing private method
     const startSpy = vi.spyOn(el, '_startStream');
     // The card is on screen, which is what the restart timer checks before it
     // opens a stream.
     // @ts-expect-error Testing private state
     el._isIntersecting = true;
 
-    // @ts-expect-error Mocking minimal hass
-    el.hass = {
+    el.hass = mockHass({
       states: {
         'camera.test_cam': {
           state: 'idle',
@@ -281,7 +270,7 @@ describe('skyline-webcams-card', () => {
         },
       },
       callWS: () => Promise.resolve({ url: '/api/mock' }),
-    };
+    });
     await el.updateComplete;
 
     expect(startSpy).not.toHaveBeenCalled(); // waits for the backoff delay
@@ -310,10 +299,9 @@ describe('skyline-webcams-card', () => {
   };
 
   it('says the webcam is offline instead of playing it', async () => {
-    el.setConfig({ entity: 'camera.test_cam', show_link: true });
+    el.setConfig(cardConfig({ entity: 'camera.test_cam', show_link: true }));
     const callWS = vi.fn(() => Promise.resolve({ url: '/api/mock' }));
-    // @ts-expect-error Mocking minimal hass
-    el.hass = { states: { 'camera.test_cam': OFFLINE_CAM }, callWS };
+    el.hass = mockHass({ states: { 'camera.test_cam': OFFLINE_CAM }, callWS });
     await el.updateComplete;
 
     const overlay = el.shadowRoot?.querySelector('.offline-overlay');
@@ -336,7 +324,6 @@ describe('skyline-webcams-card', () => {
     expect(el.shadowRoot?.querySelector('.unavailable-overlay')).toBeNull();
 
     // On screen and visible: whatever would start the stream, it must not.
-    // @ts-expect-error Testing private method
     const initSpy = vi.spyOn(el, '_initHls');
     // @ts-expect-error Testing private state
     el._isIntersecting = true;
@@ -356,9 +343,8 @@ describe('skyline-webcams-card', () => {
   });
 
   it('localizes the offline overlay', async () => {
-    el.setConfig({ entity: 'camera.test_cam' });
-    // @ts-expect-error Mocking minimal hass
-    el.hass = { language: 'de', states: { 'camera.test_cam': OFFLINE_CAM }, callWS: vi.fn() };
+    el.setConfig(cardConfig({ entity: 'camera.test_cam' }));
+    el.hass = mockHass({ language: 'de', states: { 'camera.test_cam': OFFLINE_CAM }, callWS: vi.fn() });
     await el.updateComplete;
 
     expect(el.shadowRoot?.querySelector('.offline-title')?.textContent?.trim()).toBe('Webcam offline');
@@ -368,18 +354,16 @@ describe('skyline-webcams-card', () => {
   });
 
   it('stops a playing stream when the webcam goes offline', async () => {
-    el.setConfig({ entity: 'camera.test_cam' });
+    el.setConfig(cardConfig({ entity: 'camera.test_cam' }));
     const online = { ...OFFLINE_CAM, state: 'streaming', attributes: { ...OFFLINE_CAM.attributes, offline: false } };
-    // @ts-expect-error Mocking minimal hass
-    el.hass = { states: { 'camera.test_cam': online }, callWS: vi.fn() };
+    el.hass = mockHass({ states: { 'camera.test_cam': online }, callWS: vi.fn() });
     await el.updateComplete;
     // @ts-expect-error Testing private method
     await el._startStream();
     // @ts-expect-error Testing private state
     expect(el._streamUrl).toContain('/api/skylinewebcams_proxy/tok-123.m3u8');
 
-    // @ts-expect-error Mocking minimal hass
-    el.hass = { states: { 'camera.test_cam': OFFLINE_CAM }, callWS: vi.fn() };
+    el.hass = mockHass({ states: { 'camera.test_cam': OFFLINE_CAM }, callWS: vi.fn() });
     await el.updateComplete;
 
     // @ts-expect-error Testing private state
@@ -389,20 +373,17 @@ describe('skyline-webcams-card', () => {
 
   it('starts the stream once the webcam is broadcasting again', async () => {
     vi.useFakeTimers();
-    el.setConfig({ entity: 'camera.test_cam' });
-    // @ts-expect-error Mocking minimal hass
-    el.hass = { states: { 'camera.test_cam': OFFLINE_CAM }, callWS: vi.fn() };
+    el.setConfig(cardConfig({ entity: 'camera.test_cam' }));
+    el.hass = mockHass({ states: { 'camera.test_cam': OFFLINE_CAM }, callWS: vi.fn() });
     await el.updateComplete;
     expect(el.shadowRoot?.querySelector('.offline-overlay')).not.toBeNull();
 
-    // @ts-expect-error Testing private method
     const startSpy = vi.spyOn(el, '_startStream');
     // @ts-expect-error Testing private state
     el._isIntersecting = true;
 
     const online = { ...OFFLINE_CAM, state: 'streaming', attributes: { ...OFFLINE_CAM.attributes, offline: false } };
-    // @ts-expect-error Mocking minimal hass
-    el.hass = { states: { 'camera.test_cam': online }, callWS: vi.fn() };
+    el.hass = mockHass({ states: { 'camera.test_cam': online }, callWS: vi.fn() });
     await el.updateComplete;
 
     // Through the same backoff timer as a camera that comes back from unavailable.
@@ -419,15 +400,14 @@ describe('skyline-webcams-card', () => {
   });
 
   it('never points the proxy at the entry id, which no longer opens it', async () => {
-    el.setConfig({ entity: 'camera.test_cam' });
+    el.setConfig(cardConfig({ entity: 'camera.test_cam' }));
     const callWS = vi.fn(() => Promise.resolve({ url: '/api/hls/core-token/master_playlist.m3u8' }));
-    // @ts-expect-error Mocking minimal hass
-    el.hass = {
+    el.hass = mockHass({
       states: {
         'camera.test_cam': { state: 'idle', attributes: { friendly_name: 'Test Cam', entry_id: 'abc123' } },
       },
       callWS,
-    };
+    });
     // @ts-expect-error Testing private method
     await el._startStream();
 
@@ -438,24 +418,21 @@ describe('skyline-webcams-card', () => {
 
   it('does not start a stream on a card that is scrolled out of view', async () => {
     vi.useFakeTimers();
-    el.setConfig({ entity: 'camera.test_cam' });
-    // @ts-expect-error Mocking minimal hass
-    el.hass = {
+    el.setConfig(cardConfig({ entity: 'camera.test_cam' }));
+    el.hass = mockHass({
       states: {
         'camera.test_cam': { state: 'unavailable', attributes: {} },
       },
       callWS: () => Promise.resolve({ url: '/api/mock' }),
-    };
+    });
     await el.updateComplete;
 
-    // @ts-expect-error Testing private method
     const startSpy = vi.spyOn(el, '_startStream');
     // Never scrolled into view, so nobody is watching this card.
     // @ts-expect-error Testing private state
     el._isIntersecting = false;
 
-    // @ts-expect-error Mocking minimal hass
-    el.hass = {
+    el.hass = mockHass({
       states: {
         'camera.test_cam': {
           state: 'idle',
@@ -463,7 +440,7 @@ describe('skyline-webcams-card', () => {
         },
       },
       callWS: () => Promise.resolve({ url: '/api/mock' }),
-    };
+    });
     await el.updateComplete;
 
     vi.advanceTimersByTime(30000);
@@ -472,9 +449,9 @@ describe('skyline-webcams-card', () => {
 });
 
 describe('entity suggestion', () => {
-  const suggestionFor = (hass: unknown, entityId: string) => {
+  const suggestionFor = (hass: HomeAssistant | undefined, entityId: string) => {
     const entry = window.customCards?.find((card) => card.type === 'skyline-webcams-card');
-    return entry?.getEntitySuggestion?.(hass as never, entityId) ?? null;
+    return entry?.getEntitySuggestion?.(hass as HomeAssistant, entityId) ?? null;
   };
 
   it('opts the card into the picker suggestions', () => {
@@ -487,7 +464,7 @@ describe('entity suggestion', () => {
   });
 
   it('suggests the card for one of our cameras', () => {
-    const hass = {
+    const hass = mockHass({
       states: {
         'camera.venice': {
           entity_id: 'camera.venice',
@@ -495,7 +472,7 @@ describe('entity suggestion', () => {
           attributes: { source: 'https://www.skylinewebcams.com/en/webcam/venezia.html' },
         },
       },
-    };
+    });
 
     expect(suggestionFor(hass, 'camera.venice')).toEqual({
       config: {
@@ -511,7 +488,7 @@ describe('entity suggestion', () => {
     // A config naming the bare element name is not a card Home Assistant can
     // build - it renders as "Custom element doesn't exist". The prefix is
     // added for the entries HA builds itself, never for a config we hand over.
-    const hass = {
+    const hass = mockHass({
       states: {
         'camera.venice': {
           entity_id: 'camera.venice',
@@ -519,7 +496,7 @@ describe('entity suggestion', () => {
           attributes: { source: 'https://www.skylinewebcams.com/en/webcam/venezia.html' },
         },
       },
-    };
+    });
     const suggestion = suggestionFor(hass, 'camera.venice');
     expect(suggestion && 'config' in suggestion && suggestion.config.type).toBe('custom:skyline-webcams-card');
   });
@@ -527,16 +504,16 @@ describe('entity suggestion', () => {
   it('stays out of the way for a camera that is not ours', () => {
     // The card speaks HLS to SkylineWebcams and has nothing to offer a
     // doorbell. The suggestions panel is only useful while it is short.
-    const hass = {
+    const hass = mockHass({
       states: {
         'camera.front_door': { entity_id: 'camera.front_door', state: 'idle', attributes: {} },
       },
-    };
+    });
     expect(suggestionFor(hass, 'camera.front_door')).toBeNull();
   });
 
   it('says no to a non-camera and to an entity that is not there', () => {
-    const hass = { states: { 'light.kitchen': { entity_id: 'light.kitchen', state: 'on', attributes: {} } } };
+    const hass = mockHass({ states: { 'light.kitchen': { entity_id: 'light.kitchen', state: 'on', attributes: {} } } });
     expect(suggestionFor(hass, 'light.kitchen')).toBeNull();
     expect(suggestionFor(hass, 'camera.ghost')).toBeNull();
     expect(suggestionFor(undefined, 'camera.ghost')).toBeNull();
@@ -545,7 +522,7 @@ describe('entity suggestion', () => {
   it('suggests what the stub config would have built', () => {
     // A suggestion the stub would not have produced is one that previews
     // differently from the card the picker otherwise creates.
-    const hass = {
+    const hass = mockHass({
       states: {
         'camera.venice': {
           entity_id: 'camera.venice',
@@ -553,10 +530,9 @@ describe('entity suggestion', () => {
           attributes: { source: 'https://www.skylinewebcams.com/en/webcam/venezia.html' },
         },
       },
-    };
+    });
     const suggestion = suggestionFor(hass, 'camera.venice');
     const config = suggestion && 'config' in suggestion ? suggestion.config : {};
-    // @ts-expect-error Mocking minimal hass
     const stub = SkylineWebcamsCard.getStubConfig(hass, Object.keys(hass.states));
     const withoutType = { ...(config as Record<string, unknown>) };
     delete withoutType.type;
@@ -579,13 +555,15 @@ describe('the text around the video', () => {
     },
   };
 
-  const show = async (config: Record<string, unknown>, attributes = FULL_CAM.attributes) => {
-    el.setConfig({ entity: 'camera.venice', ...config } as never);
-    // @ts-expect-error Mocking minimal hass
-    el.hass = {
+  const show = async (
+    config: Partial<SkylineWebcamsCardConfig>,
+    attributes: MockEntity['attributes'] = FULL_CAM.attributes,
+  ) => {
+    el.setConfig(cardConfig({ entity: 'camera.venice', ...config }));
+    el.hass = mockHass({
       states: { 'camera.venice': { ...FULL_CAM, attributes } },
       callWS: () => Promise.resolve({ url: '/api/mock' }),
-    };
+    });
     await el.updateComplete;
   };
 
