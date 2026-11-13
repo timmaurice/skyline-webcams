@@ -21,6 +21,7 @@ from custom_components.skylinewebcams.config_flow import (
     validate_input,
 )
 from custom_components.skylinewebcams.const import CONF_URL
+from custom_components.skylinewebcams.scraper import SkylineWebcamsParseError
 
 CAMERA_URL = (
     "https://www.skylinewebcams.com/en/webcam/deutschland/bayern/schwangau/"
@@ -255,3 +256,41 @@ async def test_a_browse_list_is_remembered_for_the_next_error(monkeypatch, sessi
 
     assert result["step_id"] == "browse"
     assert flow._last_browse_options == {CAMERA_URL: "Neuschwanstein"}
+
+
+class UnreadableScraper(FailingScraper):
+    """The pages load, but are laid out in a way the scraper does not know."""
+
+    async def get_structure(self):
+        raise SkylineWebcamsParseError("https://www.skylinewebcams.com/en/webcam.html")
+
+    async def get_locations_or_cameras(self, url):
+        raise SkylineWebcamsParseError(url)
+
+
+async def test_an_unreadable_directory_says_so(monkeypatch, session):
+    """Not "cannot connect": the site answered, its page could not be read."""
+    monkeypatch.setattr(config_flow, "SkylineWebcamsScraper", UnreadableScraper)
+    flow = make_flow()
+
+    result = await flow.async_step_continent()
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "language"
+    assert result["errors"] == {"base": "parse_failed"}
+
+
+async def test_an_unreadable_page_says_so_on_the_list_the_user_came_from(
+    monkeypatch, session
+):
+    monkeypatch.setattr(config_flow, "SkylineWebcamsScraper", UnreadableScraper)
+    flow = make_flow()
+    flow._last_browse_options = {CAMERA_URL: "Neuschwanstein"}
+
+    result = await flow.async_step_browse(
+        url="https://www.skylinewebcams.com/en/x.html"
+    )
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "browse"
+    assert result["errors"] == {"base": "parse_failed"}

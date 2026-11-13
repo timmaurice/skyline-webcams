@@ -58,6 +58,7 @@
       "cannot_connect": "Failed to connect to SkylineWebcams.",
       "invalid_url": "The URL does not look like a valid SkylineWebcams page.",
       "no_items_found": "No cameras or sub-regions found at this location.",
+      "parse_failed": "SkylineWebcams answered, but its page could not be read. The site may have changed its layout; please report this.",
       "already_configured": "This webcam is already configured.",
       "unknown": "Unexpected error occurred."
     },

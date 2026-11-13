@@ -21,7 +21,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import DOMAIN, CONF_URL
 from .helpers import online_unique_id, unique_id_for_url
-from .scraper import SkylineWebcamsScraper
+from .scraper import SkylineWebcamsParseError, SkylineWebcamsScraper
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -386,6 +386,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             scraper = SkylineWebcamsScraper(session, self._selected_language, self.hass)
             try:
                 self._structure = await scraper.get_structure()
+            except SkylineWebcamsParseError:
+                return self._show_language_form({"base": "parse_failed"})
             except Exception:  # pylint: disable=broad-except
                 _LOGGER.exception("Failed to load the webcam directory")
                 return self._show_language_form({"base": "cannot_connect"})
@@ -459,6 +461,10 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         scraper = SkylineWebcamsScraper(session, self._selected_language, self.hass)
         try:
             result = await scraper.get_locations_or_cameras(target_url)
+        except SkylineWebcamsParseError:
+            # The page loaded but is laid out in a way the scraper does not
+            # know, which is not the same as a page that lists nothing.
+            return self._show_browse_error("parse_failed")
         except Exception:  # pylint: disable=broad-except
             _LOGGER.exception("Failed to browse %s", target_url)
             return self._show_browse_error("cannot_connect")
