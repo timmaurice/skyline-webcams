@@ -1,7 +1,7 @@
 services:
   homeassistant:
     container_name: ha-skyline-webcams-test
-    image: homeassistant/home-assistant:stable
+    image: homeassistant/home-assistant:2026.11.1
     volumes:
       - ./config:/config
       - ./custom_components/skylinewebcams:/config/custom_components/skylinewebcams
