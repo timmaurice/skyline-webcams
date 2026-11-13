@@ -9,7 +9,9 @@ camera, its Online binary sensor and the backoff make of them.
 The pages keep only what the scraper reads: the og:image, the breadcrumb, the
 heading, and either the player's stream source or the OFFLINE block that takes
 its place. Trimmed from the Rome - Pantheon (offline) and Venice - St Mark's
-Square (online) pages as served on 2026-10-04.
+Square (online) pages as served on 2026-10-04; the OFFLINE block is the one the
+Pantheon page has served since the site's redesign, as of 2026-11-13, with the
+one from before kept alongside.
 
 The async cases run on pytest-asyncio in auto mode, configured in pytest.ini.
 """
@@ -30,7 +32,10 @@ from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
 from custom_components.skylinewebcams import SkylineRuntimeData
 from custom_components.skylinewebcams.binary_sensor import SkylineWebcamsOnlineSensor
-from custom_components.skylinewebcams.camera import SkylineWebcamsCamera
+from custom_components.skylinewebcams.camera import (
+    UNAVAILABLE_AFTER_FAILURES,
+    SkylineWebcamsCamera,
+)
 from custom_components.skylinewebcams.const import (
     CONF_URL,
     DOMAIN,
@@ -63,6 +68,20 @@ BREADCRUMB = """
 """
 
 OFFLINE_BLOCK = """
+<div class="cam-main">
+  <div class="thumb player off">
+    <img src="https://cdn.skylinewebcams.com/165.jpg" width="945" height="532"
+         alt="Live Cam Rome - Pantheon">
+    <div class="off-overlay">
+      <span class="badge-off">OFFLINE</span>
+      <a class="btn" href="#nearby">Discover other webcams</a>
+    </div>
+  </div>
+</div>
+"""
+
+# The same block before the redesign.
+LEGACY_OFFLINE_BLOCK = """
 <div class="request off"><div style="position:relative">
   <img src="https://cdn.skylinewebcams.com/165.jpg" style="opacity:0.7"
        class="img-responsive" alt="Live Cam">
@@ -146,12 +165,23 @@ async def look_again(hass, entry) -> str | None:
     "block",
     [
         OFFLINE_BLOCK,
-        # Either half of the marker is enough on its own.
+        # Any one part of the marker is enough on its own.
+        '<div class="thumb player off"><img src="https://cdn.skylinewebcams.com/'
+        '165.jpg"></div>',
+        '<div class="off-overlay"><span class="badge-off">OFFLINE</span></div>',
+        LEGACY_OFFLINE_BLOCK,
         '<div class="request off"><img src="https://cdn.skylinewebcams.com/165.jpg">'
         "</div>",
         '<div class="player-off"><p><strong> Offline </strong></p></div>',
     ],
-    ids=["as-served", "div-only", "strong-only"],
+    ids=[
+        "as-served",
+        "player-only",
+        "badge-only",
+        "legacy-as-served",
+        "legacy-div-only",
+        "strong-only",
+    ],
 )
 async def test_an_offline_page_makes_an_offline_camera(hass, entry, site, block):
     site.page = f"<html>{HEAD}<body>{BREADCRUMB}{block}</body></html>"
@@ -225,12 +255,17 @@ async def test_going_offline_drops_the_stream_url(hass, entry, site):
 
 
 async def test_a_page_error_is_still_unavailable(hass, entry, site):
-    """Not offline: the page itself failed, and that is an outage."""
+    """Not offline: the page itself failed, and that is an outage.
+
+    Once it has failed often enough in a row - one failure alone leaves a
+    camera that holds a stream URL available, see test_transient_failures.
+    """
     site.page = ONLINE_PAGE
     await look_again(hass, entry)
 
     site.status = 503
-    await look_again(hass, entry)
+    for _ in range(UNAVAILABLE_AFTER_FAILURES):
+        await look_again(hass, entry)
 
     assert hass.states.get(CAMERA).state == STATE_UNAVAILABLE
     # Nothing to say about the webcam when its page cannot be read.
@@ -292,7 +327,7 @@ async def test_an_offline_webcam_is_looked_at_again_after_the_long_delay(
     assert hass.states.get(SENSOR).state == STATE_ON
     assert hass.states.get(CAMERA).attributes["offline"] is False
     assert camera._retry_not_before == 0.0
-    assert camera._cancel_offline_recheck is None
+    assert camera._cancel_recheck is None
 
 
 def test_the_sensor_is_unknown_until_the_page_has_been_read():
@@ -351,11 +386,11 @@ async def test_unloading_the_entry_takes_the_sensor_along(hass, entry):
 
 async def test_unloading_cancels_the_scheduled_look(hass, entry, site):
     camera = entry.runtime_data.camera
-    assert camera._cancel_offline_recheck is not None
+    assert camera._cancel_recheck is not None
 
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
-    assert camera._cancel_offline_recheck is None
+    assert camera._cancel_recheck is None
 
     requests = site.requests
     async_fire_time_changed(
@@ -391,6 +426,6 @@ async def test_a_yaml_camera_says_offline_too_but_gets_no_sensor(hass, stand_ins
 
     # It looks again by itself as well; taking it out cancels that.
     [camera] = hass.data[DOMAIN].values()
-    assert camera._cancel_offline_recheck is not None
+    assert camera._cancel_recheck is not None
     await camera.async_remove()
-    assert camera._cancel_offline_recheck is None
+    assert camera._cancel_recheck is None

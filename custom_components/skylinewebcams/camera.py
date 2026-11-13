@@ -59,6 +59,12 @@ FETCH_BACKOFF_MAX_SECONDS = 300
 # 5s * 2**6 = 320s, already past the cap above. Counting failures beyond this
 # only builds a bigger power for a value the cap flattens anyway.
 MAX_BACKOFF_FAILURES = 7
+# How many scrapes of the page in a row may fail before a camera that holds a
+# stream URL goes unavailable. The page and the stream are served separately,
+# so one page that does not load says little about a stream that is playing.
+# With the backoff above the third failure comes some 35 seconds after the
+# first.
+UNAVAILABLE_AFTER_FAILURES = 3
 
 
 def is_allowed_stream_url(url: str | None) -> bool:
@@ -252,6 +258,9 @@ class SkylineWebcamsHlsProxyView(HomeAssistantView):
             session = camera.get_session()
             async with session.get(target_url, headers=headers) as resp:
                 if resp.status != 200:
+                    if not segment_token:
+                        # The playlist itself: the stream URL is dead.
+                        camera.async_stream_failed()
                     return web.Response(status=resp.status, text="Proxy fetch failed")
 
                 content_type = resp.headers.get("Content-Type", "")
@@ -267,6 +276,11 @@ class SkylineWebcamsHlsProxyView(HomeAssistantView):
                         # provably dead, so serving it again is worse than
                         # scraping once more.
                         target_url = await camera.get_fresh_stream_url(force=True)
+                        if camera.page_failing:
+                            # What came back is the dead URL again, the page
+                            # gave no new one.
+                            camera.async_stream_failed()
+                            target_url = None
                         if not target_url:
                             return web.Response(
                                 status=502, text="Failed to fetch fresh stream URL"
@@ -431,6 +445,10 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
         self._fetch_attempts = 0
         self._fetch_failures = 0
         self._retry_not_before = 0.0
+        # Scrapes of the page in a row that failed outright - an error status,
+        # a network error - as opposed to a page that answered without a
+        # stream on it. What decides availability, see _handle_fetch_error.
+        self._page_failures = 0
         # One scrape at a time per camera. Startup asks for the stream URL from
         # several directions at once, and without this each of them opened its
         # own request to the same page.
@@ -443,10 +461,11 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
         # says OFFLINE where the player would be and carries no stream. None
         # until a page has been read, because until then nobody knows.
         self._offline: bool | None = None
-        # Runs the next look at the page while the webcam is offline. Nothing
-        # else would: the card does not play an offline webcam, so no proxy
-        # request comes in to ask, and the camera does not poll.
-        self._cancel_offline_recheck: CALLBACK_TYPE | None = None
+        # Runs the next look at the page while the webcam is offline or its
+        # page is failing. Nothing else would: the card does not play an
+        # offline or unavailable webcam, so no proxy request comes in to ask,
+        # and the camera does not poll.
+        self._cancel_recheck: CALLBACK_TYPE | None = None
         # Told when what the binary sensor shows changes, see _async_write_status.
         self._status_listener = status_listener
         self._published_status: tuple[bool, bool | None] | None = None
@@ -529,7 +548,7 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
         # Taken out of wherever the proxy finds it, so a camera that has been
         # removed is not streamed from any more - its entry may well still be
         # loaded, when only the entity was deleted.
-        self._async_cancel_offline_recheck()
+        self._async_cancel_recheck()
         entry = self.platform.config_entry if self.platform else None
         if entry is None:
             self.hass.data.get(DOMAIN, {}).pop(self._entry_id, None)
@@ -545,6 +564,11 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
     def available(self) -> bool:
         """Return True if entity is available."""
         return self._attr_available
+
+    @property
+    def page_failing(self) -> bool:
+        """Whether the last scrape of the page failed outright."""
+        return self._page_failures > 0
 
     @property
     def offline(self) -> bool | None:
@@ -739,6 +763,7 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
             self._last_update = asyncio.get_event_loop().time()
             self._fetch_failures = 0
             self._retry_not_before = 0.0
+            self._async_cancel_recheck()
             # A stream found is a webcam that is on, whatever the page found it
             # by. Already done when the page itself was read, so this only
             # writes anything for a fetch that did not get that far.
@@ -755,6 +780,7 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
             self._retry_not_before = (
                 asyncio.get_event_loop().time() + OFFLINE_RETRY_SECONDS
             )
+            self._async_schedule_recheck(OFFLINE_RETRY_SECONDS)
             _LOGGER.debug(
                 "[%s] Webcam is offline, next look in %ds",
                 self.log_name,
@@ -776,11 +802,10 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
                 self._fetch_failures,
                 delay,
             )
-
-        if self._offline:
-            # Also after a look at an offline webcam's page that failed: the
-            # camera is unavailable then, and nothing else would look again.
-            self._async_schedule_offline_recheck()
+            if self._page_failures:
+                # The look the backoff waits for, scheduled: a camera that went
+                # unavailable is not played, so no viewer would ask for it.
+                self._async_schedule_recheck(delay)
 
         return self._stream_url
 
@@ -806,36 +831,55 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
             self._stream_url = None
             self._stream_version += 1
         else:
-            self._async_cancel_offline_recheck()
+            self._async_cancel_recheck()
             if was_offline:
                 _LOGGER.info("[%s] Webcam is broadcasting again", self.log_name)
         return True
 
     @callback
-    def _async_schedule_offline_recheck(self) -> None:
-        """Look at the page of an offline webcam again after the interval."""
+    def _async_schedule_recheck(self, delay: float) -> None:
+        """Look at the page again after `delay` seconds.
+
+        For an offline webcam, and for one whose page failed to load.
+        """
         if self.hass is None or self.platform is None:
             # Not on its way into Home Assistant: nothing to schedule on. The
             # platform is there already for the look before the entity is
             # added, which is the one that finds an offline webcam at startup.
             return
-        self._async_cancel_offline_recheck()
+        self._async_cancel_recheck()
 
         async def _async_recheck(_now) -> None:
-            self._cancel_offline_recheck = None
+            self._cancel_recheck = None
             # Forced: this is the look the backoff was waiting for, and the
             # timer and the window it closes need not agree to the millisecond.
             await self.get_fresh_stream_url(force=True)
 
-        self._cancel_offline_recheck = async_call_later(
-            self.hass, OFFLINE_RETRY_SECONDS, _async_recheck
-        )
+        self._cancel_recheck = async_call_later(self.hass, delay, _async_recheck)
 
     @callback
-    def _async_cancel_offline_recheck(self) -> None:
-        if self._cancel_offline_recheck is not None:
-            self._cancel_offline_recheck()
-            self._cancel_offline_recheck = None
+    def _async_cancel_recheck(self) -> None:
+        if self._cancel_recheck is not None:
+            self._cancel_recheck()
+            self._cancel_recheck = None
+
+    @callback
+    def async_stream_failed(self) -> None:
+        """The proxy found the stream URL in hand dead while the page fails.
+
+        That URL is what kept the camera available through the failed scrapes
+        (see _handle_fetch_error). With it gone there is nothing left to play,
+        so the camera goes unavailable now rather than after the scrapes still
+        to come; the scheduled look brings it back. While the page answers,
+        the next scrape replaces a dead URL, and nothing is done here.
+        """
+        if not self._page_failures:
+            return
+        self._stream_url = None
+        self._stream_version += 1
+        if self._attr_available:
+            self._attr_available = False
+            self._async_write_status()
 
     @callback
     def _async_write_status(self) -> None:
@@ -871,18 +915,11 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
             async with asyncio.timeout(20):
                 async with session.get(self._url, headers=headers) as response:
                     if response.status != 200:
-                        self._log_fetch_failure(
-                            "[%s] Webcam page answered %s",
-                            self.log_name,
-                            response.status,
+                        return self._handle_fetch_error(
+                            "[%s] Webcam page answered %s", response.status
                         )
-                        self._attr_available = False
-                        # Same as the error paths below: an entity that has
-                        # gone unavailable is only unavailable once the state
-                        # is written.
-                        self._async_write_status()
-                        return None
 
+                    self._page_failures = 0
                     self._attr_available = True
                     text = await response.text()
                     soup = await self._parse_html(text)
@@ -978,14 +1015,27 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
                 "[%s] Unexpected error while fetching stream URL: %s", err
             )
 
-    def _handle_fetch_error(self, message: str, err: Exception) -> None:
-        """Log a failed scrape once, mark the camera unavailable, give up.
+    def _handle_fetch_error(self, message: str, *args) -> None:
+        """Log a failed scrape once, count it, give up.
+
+        A camera that holds a stream URL stays available through a failed
+        scrape: that URL goes on playing, and taking a healthy stream down
+        because the page did not load once is what this is here to stop. It
+        goes unavailable when it has no URL to fall back on, after
+        UNAVAILABLE_AFTER_FAILURES failures in a row, or when the proxy finds
+        the URL dead (async_stream_failed).
 
         Returning None puts the caller on the backoff path, which is what keeps
-        a camera whose page is broken from being scraped on every request.
+        a camera whose page is broken from being scraped on every request, and
+        which schedules the next look.
         """
-        self._log_fetch_failure(message, self.log_name, err)
-        self._attr_available = False
+        self._log_fetch_failure(message, self.log_name, *args)
+        self._page_failures = min(self._page_failures + 1, UNAVAILABLE_AFTER_FAILURES)
+        self._attr_available = (
+            bool(self._stream_url) and self._page_failures < UNAVAILABLE_AFTER_FAILURES
+        )
+        # An entity that has gone unavailable is only unavailable once the
+        # state is written.
         self._async_write_status()
         return None
 
@@ -1004,12 +1054,14 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
         """Whether the page says the webcam is offline.
 
         An offline webcam's page still answers 200. Where the player would be
-        it shows a dimmed still in `<div class="request off">`, with OFFLINE
-        written across it in a <strong>. Either of the two is taken as the
-        marker, so a change to one of them alone does not hide it - and it is
-        only asked for once the page has turned out to carry no stream.
+        it shows a still in `<div class="thumb player off">`, with OFFLINE
+        written across it in `<span class="badge-off">`. Before the 2026
+        redesign the two were `<div class="request off">` and a <strong>, and
+        those still count. Any one of them is taken as the marker, so a change
+        to one of them alone does not hide it - and it is only asked for once
+        the page has turned out to carry no stream.
         """
-        if soup.select_one("div.request.off") is not None:
+        if soup.select_one(".player.off, .badge-off, div.request.off") is not None:
             return True
         return any(
             strong.get_text(strip=True).upper() == "OFFLINE"
