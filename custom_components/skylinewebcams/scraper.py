@@ -3,10 +3,26 @@
 from __future__ import annotations
 
 import logging
-from bs4 import BeautifulSoup
-import re
+from urllib.parse import urljoin
+
+from bs4 import BeautifulSoup, Tag
 
 _LOGGER = logging.getLogger(__name__)
+
+# What marks a webcam's own page. #live holds the player of a webcam that is
+# broadcasting; an offline webcam's page has no #live, only the player box with
+# the OFFLINE badge in it, so the layout around the player counts as well.
+# #webcam is from the layout before the 2026 redesign.
+CAMERA_PAGE_SELECTOR = "#live, #webcam, div.cam-main, div.thumb.player"
+
+
+class SkylineWebcamsParseError(Exception):
+    """A page loaded, but nothing on it is where the scraper looks.
+
+    Not the same as a page that lists nothing: that one has the list, it is
+    just empty. This one most likely means the site changed its markup, and
+    the user should hear that rather than get an empty list.
+    """
 
 
 class SkylineWebcamsScraper:
@@ -51,203 +67,112 @@ class SkylineWebcamsScraper:
             BeautifulSoup, text, "html.parser"
         )
 
+    def _absolute(self, href: str) -> str:
+        return urljoin(self.base_url + "/", href)
+
     async def get_structure(self) -> dict:
-        """Get the full structure of continents and countries from the homepage."""
-        # Use language-specific homepage
-        homepage_url = f"{self.base_url}/{self.language}.html"
-        soup = await self._get_soup(homepage_url)
+        """Get the continents and their countries from the country directory.
+
+        The directory is /<language>/webcam.html. Each continent is a
+        `div.menu` inside `div.continents`, named by its `h2.menu-nm`, with
+        the countries as plain links in its `div.menu-list`.
+
+        Returns {} when the page cannot be fetched, and raises
+        SkylineWebcamsParseError when it can but holds no continent.
+        """
+        url = f"{self.base_url}/{self.language}/webcam.html"
+        soup = await self._get_soup(url)
         if not soup:
             return {}
 
-        structure = {}
-
-        # The menu is within <div class="dropdown-menu mega-dropdown-menu">
-        # Continents are in <div class="continent ..."><strong>...</strong></div>
-
-        mega_menu = soup.find("div", class_="mega-dropdown-menu")
-        if not mega_menu:
-            return {}
-
-        # Find all continent divs
-        continent_divs = mega_menu.find_all("div", class_="continent")
-
-        for cont_div in continent_divs:
-            continent_name = cont_div.get_text(strip=True).title()
-            structure[continent_name] = []
-
-            # Countries are in sibling divs or parent->siblings
-            # Structure in example.html:
-            # <div class="col-sm-6 col-md-3">
-            #   <div class="continent americas">...</div>
-            #   <div class="row">
-            #      <div class="col-xs-12 col-md-6"><a href="...">Argentina</a>...</div>
-
-            # Go up to the column container
-            col_container = cont_div.find_parent("div", class_=re.compile(r"col-"))
-            if not col_container:
+        structure: dict[str, list[dict[str, str]]] = {}
+        for menu in soup.select("div.continents div.menu"):
+            heading = menu.find(class_="menu-nm")
+            if heading is None:
                 continue
+            continent = heading.get_text(strip=True).title()
+            countries = [
+                {"name": name, "url": self._absolute(link["href"])}
+                for link in menu.select(".menu-list a[href]")
+                if (name := link.get_text(strip=True)) and "/webcam/" in link["href"]
+            ]
+            if continent and countries:
+                structure[continent] = countries
 
-            # Find all links in this container
-            # Careful not to pick up other things, mostly <a> tags in this block are countries
-            links = col_container.find_all("a", href=True)
-            for link in links:
-                name = link.get_text(strip=True)
-                url = link["href"]
-                if not url.startswith("http"):
-                    url = (
-                        self.base_url + url
-                        if url.startswith("/")
-                        else f"{self.base_url}/{url}"
-                    )
-
-                # Filter out garbage
-                if "webcam" in url:
-                    structure[continent_name].append({"name": name, "url": url})
-
+        if not structure:
+            _LOGGER.error("Found no continents on %s, has the page changed?", url)
+            raise SkylineWebcamsParseError(url)
         return structure
 
     async def get_locations_or_cameras(self, url: str) -> dict:
         """
         Fetch a page and return:
-        - {"type": "camera", "name": title} if it's a camera page
-        - {"type": "list", "items": [...]} if it contains a list of items
+        - {"type": "camera", "name": title, "url": url} for a webcam's page
+        - {"type": "list", "items": [...]} for a country, region or place
+        - {"type": "error"} when the page cannot be fetched
+
+        A page that is neither raises SkylineWebcamsParseError.
         """
         soup = await self._get_soup(url)
         if not soup:
             return {"type": "error"}
+        return self.parse_page(soup, url)
 
-        # Check if this IS a camera page
-        # It usually has a player div or specific meta tags
-        # example.html has <div id="live" class="embed-responsive-item"></div>
-        if soup.find("div", id="live") or soup.find("div", id="webcam"):
-            # It is a camera
+    def parse_page(self, soup: BeautifulSoup, url: str) -> dict:
+        """Tell a webcam's page from a list, and read the list.
+
+        A list page has its heading in a `section`, followed by `nav.chips` -
+        the sub-regions, plus a `.back` chip to the parent - and `div.cams`,
+        every webcam below this level, each named by its `.cam-title` link.
+        Sub-regions come first: offering the 900 webcams of a country in one
+        list would make the regions pointless.
+        """
+        if soup.select_one(CAMERA_PAGE_SELECTOR) is not None:
             h1_tag = soup.find("h1")
-            title = h1_tag.string.strip() if h1_tag else "Skyline Webcam"
-            return {"type": "camera", "name": title, "url": url}
+            title = h1_tag.get_text(" ", strip=True) if h1_tag else ""
+            return {"type": "camera", "name": title or "Skyline Webcam", "url": url}
 
-        # Otherwise, scrape for items (Regions or Cameras)
-        items = []
+        # The section the heading is in, so that lists further down the page
+        # - nearby webcams, trending ones - are not taken for this one.
+        h1_tag = soup.find("h1")
+        scope: Tag = (h1_tag and h1_tag.find_parent("section")) or soup
+        chips = scope.select_one("nav.chips")
+        cams = scope.select_one("div.cams")
+        if chips is None and cams is None:
+            _LOGGER.error("Found neither regions nor webcams on %s", url)
+            raise SkylineWebcamsParseError(url)
 
-        # Strategy 1: Look for "subcategories". These are likely Regions (e.g., Crete, Attica).
-        # This prevents picking up cameras when we should be picking a region first.
-        subcats = soup.find("div", class_="subcategories")
-        if subcats:
-            links = subcats.find_all("a", href=True)
-            for link in links:
-                name = link.get_text(strip=True)
-                href = link["href"]
-                if not href.startswith("http"):
-                    href = (
-                        self.base_url + href
-                        if href.startswith("/")
-                        else f"{self.base_url}/{href}"
-                    )
+        regions = self._regions(chips, url) if chips is not None else []
+        if regions:
+            return {"type": "list", "items": regions}
+        return {
+            "type": "list",
+            "items": self._cameras(cams) if cams is not None else [],
+        }
+
+    def _regions(self, chips: Tag, url: str) -> list[dict[str, str]]:
+        """The chips that lead further down, not the one back up."""
+        depth = self._absolute(url).rstrip("/").count("/")
+        items: list[dict[str, str]] = []
+        for link in chips.select("a[href]"):
+            if "back" in (link.get("class") or []):
+                continue
+            href = self._absolute(link["href"])
+            name = link.get_text(strip=True)
+            if name and href.rstrip("/").count("/") > depth:
                 items.append({"name": name, "url": href})
+        return items
 
-            return {"type": "list", "items": items}
-
-        # Strategy 2: If no subcategories, look for the main list of cameras/regions.
-        # The main list is usually in a div with class "list" (or "row list").
-        # We search for the container to avoid sidebar items.
-
-        list_div = soup.find("div", class_="list")
-        if list_div:
-            # First, try to find region tags (they have class "tag" and "btn-primary")
-            # These are used on country pages to show regions
-            region_links = list_div.find_all("a", class_="tag")
-            if region_links:
-                # Found region tags, filter out parent/back links
-                # Parent links go up the hierarchy (fewer path segments)
-                current_depth = url.rstrip("/").count("/")
-
-                for link in region_links:
-                    href = link["href"]
-                    # Make href absolute for comparison
-                    if not href.startswith("http"):
-                        full_href = (
-                            self.base_url + href
-                            if href.startswith("/")
-                            else f"{self.base_url}/{href}"
-                        )
-                    else:
-                        full_href = href
-
-                    # Check if this link goes deeper (child) or up (parent)
-                    link_depth = full_href.rstrip("/").count("/")
-
-                    # Only include links that go deeper (children/regions)
-                    if link_depth > current_depth:
-                        name = link.get_text(strip=True)
-                        if name:
-                            items.append({"name": name, "url": full_href})
-
-                # If we found valid region links, return them
-                if items:
-                    return {"type": "list", "items": items}
-
-            # No region tags found (or all were parent links), so this is a region page with cameras
-            # Inside the list div, cameras are usually in <a> tags.
-            # We can use the presence of "tcam" class inside the link or just all links if structured well.
-            # Based on analysis, items are like <a ...><p class="tcam">Name</p></a>
-
-            # Find all children of list_div in order
-            for child in list_div.children:
-                # Check if this is the "from the web" separator
-                if child.name == "div" and child.find("h2"):
-                    h2_text = child.find("h2").get_text(strip=True).lower()
-                    if "from the web" in h2_text:
-                        # Stop here - everything after this is external webcams
-                        break
-
-                # Process links
-                if child.name == "a" and child.get("href"):
-                    link = child
-                    # Filter out garbage inside the list if any
-                    tcam = link.find(class_="tcam")
-                    name = ""
-                    if tcam:
-                        name = tcam.get_text(strip=True)
-                    else:
-                        # Fallback if tcam not found but it's a link in the list
-                        name = link.get_text(strip=True)
-
-                    href = link["href"]
-                    if not href.startswith("http"):
-                        href = (
-                            self.base_url + href
-                            if href.startswith("/")
-                            else f"{self.base_url}/{href}"
-                        )
-
-                    if name:  # Only add if we found a name
-                        items.append({"name": name, "url": href})
-
-            return {"type": "list", "items": items}
-
-        # Fallback Strategy: Old behavior (find anything with class "tcam")
-        # But try to exclude specific containers if possible?
-        # For now, if we didn't find "subcategories" or "list", maybe the page structure is different.
-
-        cam_links = soup.find_all("a", href=True)
-        for link in cam_links:
-            # Check if it has a tcam inside
-            tcam = link.find(class_="tcam")
-            if tcam:
-                # Check if this link is inside a "mega-dropdown" or "sidebar" and skip it
-                if link.find_parent(class_="mega-dropdown-menu") or link.find_parent(
-                    id="sidebar"
-                ):
-                    continue
-
-                name = tcam.get_text(strip=True)
-                href = link["href"]
-                if not href.startswith("http"):
-                    href = (
-                        self.base_url + href
-                        if href.startswith("/")
-                        else f"{self.base_url}/{href}"
-                    )
-
+    def _cameras(self, cams: Tag) -> list[dict[str, str]]:
+        items: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for title in cams.select(".cam-title"):
+            link = title if title.name == "a" else title.find_parent("a")
+            if link is None or not link.get("href"):
+                continue
+            href = self._absolute(link["href"])
+            name = title.get_text(strip=True)
+            if name and href not in seen:
+                seen.add(href)
                 items.append({"name": name, "url": href})
-
-        return {"type": "list", "items": items}
+        return items
