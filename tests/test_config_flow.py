@@ -9,6 +9,7 @@ The async cases run on pytest-asyncio in auto mode, configured in pytest.ini.
 """
 
 import asyncio
+import pathlib
 
 import aiohttp
 import pytest
@@ -38,7 +39,9 @@ class FakeHass:
 
 class FakeResponse:
     def __init__(
-        self, status=200, text="<html><h1>Venice <span>live</span></h1></html>"
+        self,
+        status=200,
+        text='<html><div id="live"></div><h1>Venice <span>live</span></h1></html>',
     ):
         self.status = status
         self._text = text
@@ -121,6 +124,33 @@ async def test_the_title_comes_from_a_heading_with_child_tags(session):
 
 
 @pytest.mark.timeout(5)
+@pytest.mark.parametrize(
+    "name", ["countries.html", "country.html", "region.html", "place.html"]
+)
+async def test_a_list_page_is_not_accepted_as_a_webcam(monkeypatch, name):
+    """The home page and the country lists are on the right host, but no camera."""
+    page = (pathlib.Path(__file__).parent / "fixtures" / name).read_text("utf-8")
+    fake = FakeSession(FakeResponse(text=page))
+    monkeypatch.setattr(config_flow, "async_get_clientsession", lambda hass: fake)
+
+    with pytest.raises(ValueError, match="not_a_webcam"):
+        await validate_input(
+            FakeHass(),
+            {CONF_URL: "https://www.skylinewebcams.com/en/webcam/italia.html"},
+        )
+
+
+@pytest.mark.parametrize("name", ["camera.html", "camera_offline.html"])
+async def test_a_webcam_page_is_accepted(monkeypatch, name):
+    page = (pathlib.Path(__file__).parent / "fixtures" / name).read_text("utf-8")
+    fake = FakeSession(FakeResponse(text=page))
+    monkeypatch.setattr(config_flow, "async_get_clientsession", lambda hass: fake)
+
+    info = await validate_input(FakeHass(), {CONF_URL: CAMERA_URL})
+
+    assert info["title"]
+
+
 async def test_a_hanging_request_gives_up(monkeypatch):
     """Without a timeout the flow sat there for as long as the host wanted.
 

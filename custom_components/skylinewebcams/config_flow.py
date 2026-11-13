@@ -21,7 +21,11 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import DOMAIN, CONF_URL
 from .helpers import online_unique_id, unique_id_for_url
-from .scraper import SkylineWebcamsParseError, SkylineWebcamsScraper
+from .scraper import (
+    CAMERA_PAGE_SELECTOR,
+    SkylineWebcamsParseError,
+    SkylineWebcamsScraper,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -82,6 +86,11 @@ async def validate_input(hass, data):
         # get_text, not .string: a heading with a child tag has no .string,
         # which used to raise an AttributeError and show "unknown".
         title = h1_tag.get_text(" ", strip=True) if h1_tag else ""
+        # The scraper's own test for a webcam's page. The host check alone let
+        # the home page and the country lists through, which became entries
+        # that could never play.
+        if soup.select_one(CAMERA_PAGE_SELECTOR) is None:
+            raise ValueError("not_a_webcam")
         return {"title": title or DEFAULT_TITLE}
 
     except (aiohttp.ClientError, asyncio.TimeoutError):
@@ -185,14 +194,16 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             try:
                 info = await validate_input(self.hass, user_input)
-                await self.async_set_unique_id(unique_id_for_url(user_input[CONF_URL]))
-                self._abort_if_unique_id_configured()
-                return self.async_create_entry(title=info["title"], data=user_input)
             except ValueError as error:
                 errors["base"] = str(error)
             except Exception:  # pylint: disable=broad-except
                 _LOGGER.exception("Unexpected exception")
                 errors["base"] = "unknown"
+            else:
+                # Outside the try: AbortFlow must reach core, not the catch-all.
+                await self.async_set_unique_id(unique_id_for_url(user_input[CONF_URL]))
+                self._abort_if_unique_id_configured()
+                return self.async_create_entry(title=info["title"], data=user_input)
 
         return self.async_show_form(
             step_id="manual", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
