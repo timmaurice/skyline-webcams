@@ -2,9 +2,10 @@
  * Talks to the Home Assistant the repository's docker-compose already provides.
  *
  * The suite deliberately reuses that instance instead of booting one of its
- * own: it is already onboarded and carries real entities, which is what makes
- * an end-to-end assertion worth more than a mock. Everything the suite writes
- * goes into a dashboard of its own, so the manual playground stays intact.
+ * own. A fresh clone has no `.storage`, so global setup onboards the instance
+ * through the API when it is still fresh (see `ensureOnboarded`); an instance
+ * that is already onboarded is used as it is. Everything the suite writes goes
+ * into a dashboard of its own, so a manual playground stays intact.
  */
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
@@ -47,6 +48,68 @@ export async function waitForFrontend(timeoutMs = 180_000): Promise<void> {
     await new Promise((r) => setTimeout(r, 2000));
   }
   throw new Error(`Home Assistant did not answer at ${BASE_URL} within ${timeoutMs}ms`);
+}
+
+interface OnboardingStep {
+  step: string;
+  done: boolean;
+}
+
+/**
+ * Onboards a brand-new Home Assistant through its API, the same calls the
+ * onboarding screen makes, so a clean checkout (or CI) needs no pre-seeded
+ * `.storage`. Does nothing when onboarding is already complete.
+ */
+export async function ensureOnboarded(): Promise<void> {
+  const res = await fetch(`${BASE_URL}/api/onboarding`);
+  // The endpoint is gone (404) once onboarding has finished.
+  if (res.status === 404) return;
+  if (!res.ok) throw new Error(`reading onboarding state failed: ${res.status}`);
+  const steps = (await res.json()) as OnboardingStep[];
+  const pending = (name: string) => steps.some((s) => s.step === name && !s.done);
+  if (!pending('user')) {
+    if (steps.every((s) => s.done)) return;
+    throw new Error(
+      'Home Assistant is partly onboarded and the suite has no tokens for it - remove config/.storage and rerun.',
+    );
+  }
+
+  const clientId = `${BASE_URL}/`;
+  const json = { 'Content-Type': 'application/json' };
+  const created = await fetch(`${BASE_URL}/api/onboarding/users`, {
+    method: 'POST',
+    headers: json,
+    body: JSON.stringify({
+      client_id: clientId,
+      name: 'Admin',
+      username: USERNAME,
+      password: PASSWORD,
+      language: 'en',
+    }),
+  });
+  if (!created.ok) throw new Error(`onboarding the user failed: ${created.status} ${await created.text()}`);
+  const { auth_code: code } = (await created.json()) as { auth_code: string };
+
+  const tokenRes = await fetch(`${BASE_URL}/auth/token`, {
+    method: 'POST',
+    body: new URLSearchParams({ grant_type: 'authorization_code', code, client_id: clientId }),
+  });
+  if (!tokenRes.ok) throw new Error(`exchanging the onboarding code failed: ${tokenRes.status}`);
+  const { access_token: token } = (await tokenRes.json()) as { access_token: string };
+
+  const authed = { ...json, Authorization: `Bearer ${token}` };
+  for (const [step, body] of [
+    ['core_config', {}],
+    ['analytics', {}],
+    ['integration', { client_id: clientId, redirect_uri: `${BASE_URL}/?auth_callback=1` }],
+  ] as const) {
+    const done = await fetch(`${BASE_URL}/api/onboarding/${step}`, {
+      method: 'POST',
+      headers: authed,
+      body: JSON.stringify(body),
+    });
+    if (!done.ok) throw new Error(`onboarding step ${step} failed: ${done.status} ${await done.text()}`);
+  }
 }
 
 export interface Tokens {
