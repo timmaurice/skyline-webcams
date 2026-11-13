@@ -325,3 +325,24 @@ async def test_a_duplicate_manual_url_aborts_without_a_traceback(
     assert result["type"] == "abort"
     assert result["reason"] == "already_configured"
     assert "Unexpected exception" not in caplog.text
+
+
+async def test_a_manual_url_for_a_yaml_camera_is_refused(hass, stand_ins, pages):
+    """A YAML camera already holds the camera row; a second entry would get none."""
+    er.async_get(hass).async_get_or_create(
+        "camera", DOMAIN, unique_id_for_url(CAMERA_URL), suggested_object_id="yaml"
+    )
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": "user"}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"action": "Manual URL"}
+    )
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_URL: CAMERA_URL}
+    )
+
+    assert result["type"] == "form"
+    assert result["errors"] == {"base": "already_configured"}
+    assert hass.config_entries.async_entries(DOMAIN) == []
