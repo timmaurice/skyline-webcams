@@ -207,9 +207,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 if self._camera_id_taken(None, unique_id):
                     errors["base"] = "already_configured"
                 else:
-                    return self.async_create_entry(
-                        title=info["title"], data=user_input
-                    )
+                    return self.async_create_entry(title=info["title"], data=user_input)
 
         return self.async_show_form(
             step_id="manual", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
