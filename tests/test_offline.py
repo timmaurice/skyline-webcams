@@ -3,15 +3,13 @@
 An offline webcam's page still answers 200, so the camera used to stay
 available and the card showed the page's poster - which has LIVE printed on it.
 Nothing said the webcam was off; it looked like the integration was broken.
-These tests serve trimmed copies of the two kinds of page and check what the
-camera, its Online binary sensor and the backoff make of them.
-
-The pages keep only what the scraper reads: the og:image, the breadcrumb, the
-heading, and either the player's stream source or the OFFLINE block that takes
-its place. Trimmed from the Rome - Pantheon (offline) and Venice - St Mark's
-Square (online) pages as served on 2026-10-04; the OFFLINE block is the one the
-Pantheon page has served since the site's redesign, as of 2026-11-13, with the
-one from before kept alongside.
+These tests serve the trimmed pages in fixtures/ - Rome - Pantheon (offline)
+and Venice - St Mark's Square (online), as the redesigned site serves them -
+and check what the camera, its Online binary sensor and the backoff make of
+them. The online fixture has no player script (the trimming strips scripts), so
+the player is added here; variants of the OFFLINE marker are swapped into the
+offline page. tests/test_canary_fixtures.py keeps the fixtures themselves
+honest against the live site.
 
 The async cases run on pytest-asyncio in auto mode, configured in pytest.ini.
 """
@@ -22,9 +20,11 @@ import asyncio
 import logging
 import types
 from datetime import timedelta
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from bs4 import BeautifulSoup
 from homeassistant.const import STATE_OFF, STATE_ON, STATE_UNAVAILABLE
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
@@ -50,23 +50,31 @@ from .conftest import CAMERA_URL, make_entry
 CAMERA = "camera.neuschwanstein"
 SENSOR = "binary_sensor.neuschwanstein_online"
 
-HEAD = """
-<head>
-  <meta property="og:image" content="https://cdn.skylinewebcams.com/social165.jpg">
-</head>
-"""
+FIXTURES = Path(__file__).parent / "fixtures"
 
-BREADCRUMB = """
-<ol class="breadcrumb">
-  <li><meta itemprop="name" content="Live Cams"></li>
-  <li><a href="/en/webcam/italia.html"><span>Italy</span></a></li>
-  <li><a href="/en/webcam/italia/lazio.html"><span>Lazio</span></a></li>
-  <li><a href="/en/webcam/italia/lazio/roma.html"><span>Rome</span></a></li>
-</ol>
-<h1>Rome - Pantheon Live cam</h1>
-<h2>Rome, view of the Pantheon, Piazza della Rotonda</h2>
+# The pages are the ones in fixtures/, as the redesigned site serves them
+# (trimmed, see test_scraper.py), not markup built here: a copy built here goes
+# on passing after the site has moved on, which is how this file once kept
+# testing an ol.breadcrumb the pages no longer had.
+OFFLINE_PAGE = (FIXTURES / "camera_offline.html").read_text(encoding="utf-8")
+# The fixture of a broadcasting page has the layout but no player script - the
+# trimming strips scripts - so the player is put back, as the site serves it.
+PLAYER = """
+<script>
+  var player = new Clappr.Player({
+    poster: 'https://cdn.skylinewebcams.com/live165.jpg',
+    source: 'livee.m3u8?a=token123',
+  });
+</script>
 """
+_ONLINE_FIXTURE = (FIXTURES / "camera.html").read_text(encoding="utf-8")
+ONLINE_PAGE = _ONLINE_FIXTURE.replace("</body>", f"{PLAYER}</body>")
+# The page answers and has neither a stream nor the OFFLINE marker: what a
+# change to the site's markup looks like from here. The fixture of a
+# broadcasting page is exactly that without its player.
+NO_STREAM_PAGE = _ONLINE_FIXTURE
 
+# The OFFLINE block as the page serves it since the redesign, and before.
 OFFLINE_BLOCK = """
 <div class="cam-main">
   <div class="thumb player off">
@@ -79,8 +87,6 @@ OFFLINE_BLOCK = """
   </div>
 </div>
 """
-
-# The same block before the redesign.
 LEGACY_OFFLINE_BLOCK = """
 <div class="request off"><div style="position:relative">
   <img src="https://cdn.skylinewebcams.com/165.jpg" style="opacity:0.7"
@@ -89,20 +95,17 @@ LEGACY_OFFLINE_BLOCK = """
 </div></div>
 """
 
-PLAYER = """
-<script>
-  var player = new Clappr.Player({
-    poster: 'https://cdn.skylinewebcams.com/live165.jpg',
-    source: 'livee.m3u8?a=token123',
-  });
-</script>
-"""
 
-OFFLINE_PAGE = f"<html>{HEAD}<body>{BREADCRUMB}{OFFLINE_BLOCK}</body></html>"
-ONLINE_PAGE = f"<html>{HEAD}<body>{BREADCRUMB}{PLAYER}</body></html>"
-# The page answers and has neither: what a change to the site's markup looks
-# like from here.
-NO_STREAM_PAGE = f"<html>{HEAD}<body>{BREADCRUMB}</body></html>"
+def offline_page_with(block: str) -> str:
+    """The offline fixture with its OFFLINE block swapped for `block`.
+
+    Keeps the rest of the real page around it, so a variant of the marker is
+    tested in the page it would arrive in.
+    """
+    soup = BeautifulSoup(OFFLINE_PAGE, "html.parser")
+    soup.select_one("div.cam-main").replace_with(BeautifulSoup(block, "html.parser"))
+    return str(soup)
+
 
 STREAM_URL = "https://hd-auth.skylinewebcams.com/live.m3u8?a=token123"
 
@@ -184,7 +187,7 @@ async def look_again(hass, entry) -> str | None:
     ],
 )
 async def test_an_offline_page_makes_an_offline_camera(hass, entry, site, block):
-    site.page = f"<html>{HEAD}<body>{BREADCRUMB}{block}</body></html>"
+    site.page = offline_page_with(block)
     assert await look_again(hass, entry) is None
 
     camera = entry.runtime_data.camera
@@ -198,7 +201,6 @@ async def test_an_offline_page_makes_an_offline_camera(hass, entry, site, block)
     assert state.attributes["offline"] is True
     # The rest of the page is still read: the card shows it around the poster.
     assert state.attributes["poster"] == "https://cdn.skylinewebcams.com/social165.jpg"
-    assert state.attributes["place"] == "Rome"
     assert hass.states.get(SENSOR).state == STATE_OFF
 
 
