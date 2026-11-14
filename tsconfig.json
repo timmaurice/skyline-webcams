@@ -17,6 +17,6 @@
     "lib": ["ES2022", "DOM"],
     "types": []
   },
-  "include": ["frontend/src/**/*.ts", "frontend/src/declarations.d.ts"],
+  "include": ["frontend/src/**/*.ts", "frontend/src/declarations.d.ts", "frontend/test/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }
