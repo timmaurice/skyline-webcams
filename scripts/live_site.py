@@ -59,6 +59,19 @@ class FetchError(Exception):
     """The site did not give us a page - not the same as a page that changed."""
 
 
+class PageNotOk(FetchError):
+    """The site answered, but not with the page: a 404 says the page is gone.
+
+    Unlike a 429 or a 5xx this is an answer about the page itself, so the
+    canary counts it as a change, not as the site being out of reach.
+    """
+
+
+def unreachable(status: int) -> bool:
+    """A status that says nothing about the page: rate limited, or the site down."""
+    return status == 429 or status >= 500
+
+
 def make_session() -> aiohttp.ClientSession:
     return aiohttp.ClientSession(
         headers={"User-Agent": USER_AGENT, "Referer": f"{BASE}/"},
@@ -71,7 +84,8 @@ async def fetch(session: aiohttp.ClientSession, path_or_url: str) -> str:
     try:
         async with session.get(url) as response:
             if response.status != 200:
-                raise FetchError(f"{url} answered {response.status}")
+                error = FetchError if unreachable(response.status) else PageNotOk
+                raise error(f"{url} answered {response.status}")
             return await response.text()
     except (aiohttp.ClientError, asyncio.TimeoutError) as err:
         raise FetchError(f"{url}: {err!r}") from err
