@@ -7,6 +7,7 @@ import asyncio
 import hmac
 import re
 import secrets
+import shlex
 from hashlib import sha256
 from urllib.parse import urlparse
 import aiohttp
@@ -638,16 +639,15 @@ class SkylineWebcamsCamera(Camera, RestoreEntity):
         self, width: int | None = None, height: int | None = None
     ) -> bytes | None:
         """Return a still image response directly using the stream or fallback to page poster."""
-        if "poster" not in self._additional_attributes:
-            await self.get_fresh_stream_url()
-
+        # Also reads the page, which is where the poster fallback comes from.
         url = await self.get_fresh_stream_url()
         if url:
             try:
                 image_bytes = await async_get_image(
                     self.hass,
-                    url,
-                    extra_cmd=self.ffmpeg_arguments,
+                    # Input options, ahead of -i: ha-ffmpeg puts extra_cmd after
+                    # -i, where the headers are output options and never sent.
+                    f"{self.ffmpeg_arguments} -i {shlex.quote(url)}",
                     width=width,
                     height=height,
                 )
